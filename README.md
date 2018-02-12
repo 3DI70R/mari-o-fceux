@@ -1,7 +1,7 @@
 # MarI/O FCEUX
 FCEUX port of [SethBling's MarI/O.][1] All credits to SethBling.
 
-<kbd>![Demonstration](demo.gif)</kbd>
+<kbd>![Demonstration](gifs/demo.gif)</kbd>
 
 ## Why FCEUX?
 It runs on Linux.
