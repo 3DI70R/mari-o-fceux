@@ -1,10 +1,16 @@
-# MarI/O FCEUX
-FCEUX port of [SethBling's MarI/O.][1] All credits to SethBling.
+# MarI/O FCEUX Replay Edition
+When one mario isnt enough
 
-<kbd>![Demonstration](gifs/demo.gif)</kbd>
+![A gif for your attention](gifs/demo_visualize_1500_sprites.gif)
 
-## Why FCEUX?
-It runs on Linux.
+## Why does this fork exist?
+It is quite boring to watch how original algorithm takes infinite amount of same looking trials and errors over and over again. So currently this fork aimed to create enhanced visuals, so learning progress can be more entertaining.
+
+## Features
+- Records last unique X amount of retries (can be configured in .lua file)
+- Displays all of them on screen simultaneously
+- Two record display modes
+- Uses sprites from Super Mario Maker for replay visualization (160 characters total) 
 
 ## Instructions
 1. Save neatevolve.lua somewhere on your computer.
@@ -16,6 +22,33 @@ It runs on Linux.
 If you start FCEUX from the terminal you'll get some usefull debug info.
 
 Tested on FCEUX 2.2.2 (Ubuntu 16.04). 
+
+## Configuration
+Currently script can be configured by editing .lua file directly.
+```
+DrawRecordAsBox = false -- draws record using simple colored box during playback
+DrawRecordTrail = false -- draws record trajectory trail during playback
+```
+<kbd>![Demonstration](gifs/demo_visualize_box_and_trail.gif)</kbd>
+```
+DrawRecordAsSprite = true -- draws record using character sprite during playback
+```
+<kbd>![Demonstration](gifs/demo_visualize_sprites.gif)</kbd>
+```
+MaxRecords = 1024               - maximum amount of stored and played records
+                                  when this number is exceeded, oldest record
+                                  will be removed
+SynchronizedPlayback = false    - Should replays wait for current iteration to finish
+                                  if set to true, every replay will start for beginning
+                                  when new iteration is run. Useful when you want race-like replays
+                                  but it can be very crowded in the beginning.
+                                  if set to false, every replay plays itself independent
+                                  of others on infinite loop, so all replays redistributed
+                                  on level move evenly
+                                
+RecordTrailFrameCount = 30      - trail length in frames
+DissolveAnimationFrames = 15    - fade out animation duration in frames
+```
 
 ### Loading a previous generation
 Backups of every generation will be saved in a folder called 'backups'. If you wish to load or continue from a backup, edit the settings in the script, e.g.
@@ -32,4 +65,17 @@ You can toggle the HUD elements ON/OFF by clicking on them. Turning HUD elements
 ## Changes from SethBling's original script
 Mostly just some gui/HUD stuff that wasn't supported in FCEUX. Otherwise it's quite vanilla. Super Mario World references were removed since FCEUX is NES only. If you know a SNES emulator that runs on linux and supports lua scripting let me know, I'd love to get this working for SMW!
 
-[1]: https://www.youtube.com/watch?v=qv6UVOQ0F44
+## Known problems, which will be fixed (probably)
+- Replays doesnt track, which world or location you are in, so if you're inside of the pipe, you can see other replays from here
+- Replays doesnt record player direction
+- Not all animation frames recorded (for unknown animations, idle frame is displayed)
+
+## TODO
+- Fix all known problems
+- Recordings backup and export
+- Probably script which allow to playback these replays during normal gameplay
+
+## Credits:
+- MarI/O: SethBling
+- FCEUX Port: juvester
+- Super Mario Maker Sprites: Random Talking Bush
