@@ -92,12 +92,14 @@ DrawRecordTrail = false -- draw record trajectory trail during playback
 RecordColors = { "red", "green", "blue", "cyan", "magenta", "yellow", "purple", "white", "orange" } -- colors used to display boxes and trails
 RecordTrailFrameCount = 30 -- trail length in frames
 DissolveAnimationFrames = 15 -- fade out animation duration in frames
+PlayerCloseFadeDistance = 0 -- objects will start to fade at this distance to player, so player can be visible in very crowded environment. 0 to disable
+PlayerCloseMaxFade = 0.0 -- maximum fade amount, so record still can be visible, even if its on same spot as player
 
 RecordsList = {}
 GenerationRecordsList = {}
 CurrentRecord = {}
 ReplayCharacterSpriteCount = 160 -- amount of characters in sprites folder
-ReplayCharacterFrameNames = { "idle", "walk1", "walk2", "walk3", "jump", "skid" }
+ReplayCharacterFrameNames = { "idle", "walk1", "walk2", "walk3", "jump", "skid", "climb1", "climb2", "swim1", "swim2", "swim3", "swim4", "swim5", "swim6" }
 ReplayCharacterSprites = {}
 RecordColorsCount = table.getn(RecordColors)
 
@@ -148,20 +150,42 @@ end
 -- Player animation detection
 
 function readCharacterAnimationDirection()
-	return memory.readbyte(0x0003) == 2
+	return memory.readbyte(0x0033) == 2
 end
 
 function readCharacterAnimationSprite()
-	-- TODO: more reliable character sprite detection
-	local anim = memory.readbyte(0x0221) - 1
 
-	if anim == 0x34 then return 2 end
-	if anim == 0x38 then return 3 end
-	if anim == 0x3b then return 4 end
-	if anim == 0x42 then return 5 end
-	if anim == 0x40 then return 6 end
-	if anim == 0x91 then return 7 end
-	if anim == 0x93 or anim == 90 then return 8 end
+	local anim = memory.readbyte(0x0221)
+
+	if anim == 0x38 or anim == 0x39
+	or anim == 0x06 or anim == 0x07
+	then return 2 end -- walk1
+
+	if anim == 0x3b or anim == 0x3c 
+	or anim == 0x16 or anim == 0x17
+	then return 3 end -- walk2
+
+	if anim == 0x34 or anim == 0x35
+	or anim == 0x0e or anim == 0x0f
+	then return 4 end -- walk3
+
+	if anim == 0x42 or anim == 0x43
+	or anim == 0x26 or anim == 0x27
+	then return 5 end -- jump
+
+	if anim == 0x3f or anim == 0x40 
+	or anim == 0x1e or anim == 0x1f
+	then return 6 end -- skid
+
+	if anim == 0x90 or anim == 0x91
+	or anim == 0x5c or anim == 0x5d
+	then return 7 end -- climb1
+
+	if anim == 0x92 or anim == 0x93
+	or anim == 0x5e or anim == 0x5f
+	then return 8 end -- climb2
+
+	-- 9f - dead
 
 	return 1
 end
@@ -203,7 +227,6 @@ function recordCurrentFrame(record)
 	local animDirection = readCharacterAnimationDirection()
 
 	table.insert(record.frames, newFrame(marioX, marioY, animIndex, animDirection));
-	table.insert(record.frameSprites, getCharacterSprite(animIndex, animDirection, record.skin))
 
 	record.fitness = fitness
 	record.hash = record.hash + marioX * marioY
@@ -217,11 +240,19 @@ end
 function saveGenerationRecord(record)
 	if isRecordExistsInList(record, RecordsList) then return end
 	table.insert(RecordsList, record)
+	updateRecordSpriteList(record)
 	if #RecordsList > MaxRecords then
 		table.remove(RecordsList, 1)
 	end
 
 	emu.print("New unique record added to record list (" .. record.hash .. "), " .. table.getn(RecordsList) .. " total" )
+end
+
+function updateRecordSpriteList(record)
+	record.frameSprites = {}
+	for i, frame in ipairs(record.frames) do
+		table.insert(record.frameSprites, getCharacterSprite(frame.animation, frame.direction, record.skin))
+	end	
 end
 
 -- Record playback functions
@@ -266,6 +297,18 @@ function forEachRecord(func)
 	end	
 end
 
+function calculateProximityOpacity(frameData)
+	local opacityScale = 1
+
+	if PlayerCloseFadeDistance > 0 then
+		opacityScale = getProximity(frameData.x, frameData.y, marioX, marioY) / PlayerCloseFadeDistance
+		if opacityScale > 1 then opacityScale = 1 end
+		if opacityScale < PlayerCloseMaxFade then opacityScale = PlayerCloseMaxFade end
+	end	
+
+	return opacityScale
+end
+
 function drawRecordTrail(record, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
 	local prevXPosition
 	local prevYPosition
@@ -280,10 +323,12 @@ function drawRecordTrail(record, lastFrame, currentFrame, xScreenOffset, yScreen
 		local frameData = record.frames[frame]
 		local xPosition = frameData.x - xScreenOffset + 8
 		local yPosition = frameData.y - yScreenOffset + 24
-		local colorScale = (frame - firstFrame + 1) / RecordTrailFrameCount
 
-		if prevXPosition and isInScreenBounds(xPosition, yPosition, 4) then
-			gui.opacity(colorScale)
+		if prevXPosition and (not (xPosition == prevXPosition) or not (yPosition == prevYPosition)) and isInScreenBounds(xPosition, yPosition, 4) then
+			local proximityScale = calculateProximityOpacity(frameData)
+			local colorScale = (frame - firstFrame + 1) / RecordTrailFrameCount
+
+			gui.opacity(colorScale * proximityScale)
 			gui.line(prevXPosition, prevYPosition, xPosition, yPosition, record.color, false)
 		end	
 
@@ -302,12 +347,13 @@ function drawRecordBox(record, lastFrame, currentFrame, xScreenOffset, yScreenOf
 	if isInScreenBounds(xPosition, yPosition, 12) and (frameCount + DissolveAnimationFrames) > currentFrame then 
 
 		local size = 1
+		local proximityScale = calculateProximityOpacity(frameData)
 
 		if frameCount > currentFrame then
-			gui.opacity(1)
+			gui.opacity(proximityScale)
 		else
 			local t = (currentFrame - frameCount) / DissolveAnimationFrames
-			gui.opacity(1 - t)
+			gui.opacity((1 - t) * proximityScale)
 			size = 1 + 10 * t
 		end	
 
@@ -320,17 +366,18 @@ function drawRecordCharacter(record, lastFrame, currentFrame, xScreenOffset, ySc
 	
 	local frameData = record.frames[lastFrame]
 	local xPosition = frameData.x - xScreenOffset - 4
-	local yPosition = frameData.y - yScreenOffset + 9
+	local yPosition = frameData.y - yScreenOffset + 9	
 	local animImage = record.frameSprites[lastFrame]
 	local frameCount = #record.frames
+	local proximityScale = calculateProximityOpacity(frameData)
 
 	if isInScreenBounds(xPosition, yPosition, 24) and (frameCount + DissolveAnimationFrames) > currentFrame then
 		
 		if frameCount > currentFrame then
-			gui.opacity(1)
+			gui.opacity(proximityScale)
 		else
 			local t = (currentFrame - frameCount) / DissolveAnimationFrames
-			gui.opacity(1 - t)
+			gui.opacity((1 - t) * proximityScale)
 		end
 		
 		gui.image(xPosition, yPosition, animImage)
@@ -352,6 +399,10 @@ function drawRecords()
 end
 
 -- Utility functions
+
+function getProximity(x1, y1, x2, y2)
+	return math.max(math.abs(x1 - x2), math.abs(y1 - y2))
+end
 
 function isInScreenBounds(x, y, radius)
 	return x > -radius and x < 256 + radius and y > -radius and y < 256 + radius
@@ -1545,6 +1596,8 @@ while true do
 	pool.currentFrame = pool.currentFrame + 1
 	recordCurrentFrame(CurrentRecord)
 	updatePlaybackFrame(pool.currentFrame);
+
+	--drawRecordCharacter(CurrentRecord, pool.currentFrame, pool.currentFrame, marioX - screenX, 16)
 
 	processMouseClicks()
 	emu.frameadvance();
