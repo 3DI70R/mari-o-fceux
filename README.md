@@ -26,8 +26,8 @@ Tested on FCEUX 2.2.2 (Ubuntu 16.04).
 ## Configuration
 Currently script can be configured by editing .lua file directly.
 ```
-DrawRecordAsBox = false -- draws record using simple colored box during playback
-DrawRecordTrail = false -- draws record trajectory trail during playback
+DrawRecordAsBox = true -- draws record using simple colored box during playback
+DrawRecordTrail = true -- draws record trajectory trail during playback
 ```
 <kbd>![Demonstration](gifs/demo_visualize_box_and_trail.gif)</kbd>
 ```
@@ -48,6 +48,10 @@ SynchronizedPlayback = false    - Should replays wait for current iteration to f
                                 
 RecordTrailFrameCount = 30      - trail length in frames
 DissolveAnimationFrames = 15    - fade out animation duration in frames
+PlayerCloseFadeDistance = 32    - objects will start to fade at this distance to player, 
+                                  so player can be seen through in very crowded environment. 0 to disable
+PlayerCloseMaxFade = 0.1        - maximum fade amount, so record still can be visible, 
+                                  even if its on same spot as player (0: fully transparent, 1: fully opaque)
 ```
 
 ### Loading a previous generation
