@@ -82,7 +82,8 @@ MaxNodes = 1000000
 
 -- recording
 
-MaxRecords = 1024 -- max simultaneously displaying records
+MaxGenerationRecords = 1024 -- max record amount for each generation
+MaxPlayedRecords = 1024 -- max simultaneously displaying records
 SynchronizedPlayback = false -- should all records play simultaneously
 
 DrawRecordAsSprite = true -- draw record using character sprite during playback
@@ -92,21 +93,36 @@ DrawRecordTrail = false -- draw record trajectory trail during playback
 RecordColors = { "red", "green", "blue", "cyan", "magenta", "yellow", "purple", "white", "orange" } -- colors used to display boxes and trails
 RecordTrailFrameCount = 30 -- trail length in frames
 DissolveAnimationFrames = 15 -- fade out animation duration in frames
-PlayerCloseFadeDistance = 0 -- objects will start to fade at this distance to player, so player can be visible in very crowded environment. 0 to disable
-PlayerCloseMaxFade = 0.0 -- maximum fade amount, so record still can be visible, even if its on same spot as player
+PlayerCloseFadeDistance = 32 -- objects will start to fade at this distance to player, so player can be visible in very crowded environment. 0 to disable
+PlayerCloseMaxFade = 0.1 -- maximum fade amount, so record still can be visible, even if its on same spot as player
 
-RecordsList = {}
 GenerationRecordsList = {}
+PlayingRecordsList = {}
 CurrentRecord = {}
+
 ReplayCharacterSpriteCount = 160 -- amount of characters in sprites folder
-ReplayCharacterFrameNames = { "idle", "walk1", "walk2", "walk3", "jump", "skid", "climb1", "climb2", "swim1", "swim2", "swim3", "swim4", "swim5", "swim6" }
-ReplayCharacterSprites = {}
-RecordColorsCount = table.getn(RecordColors)
+ReplayCharacterFrameNames = { 
+	"idle", 
+	"walk1", 
+	"walk2", 
+	"walk3", 
+	"jump", 
+	"skid", 
+	"climb1", 
+	"climb2", 
+	"swim1", 
+	"swim2", 
+	"swim3", 
+	"swim4", 
+	"swim5", 
+	"swim6" 
+}
+ReplayCharacterSprites = {} -- table which hold every loaded sprite
+RecordCharacterUnusedSprites = {} -- table used by random skin generator, to track which skins are unused, to prevent duplicates
 
 -- Sprite management functions
 
 function loadCharacterSprites()
-
 	for c = 1, ReplayCharacterSpriteCount do
 		for i, name in pairs(ReplayCharacterFrameNames) do
 			loadCharacterSprite(i, false, c)
@@ -204,74 +220,106 @@ end
 function newRecording()
 	local recording = {}
 
-	-- recording data
 	recording.generation = pool.generation
 	recording.currentSpecies = pool.currentSpecies
 	recording.genome = pool.currentGenome
 	recording.fitness = 0
 	recording.hash = 0
 	recording.frames = {}
-	recording.skin = math.random(1, ReplayCharacterSpriteCount)
-	recording.color = RecordColors[math.random(1, RecordColorsCount)]
-
-	-- data for playback
-	recording.playbackFrame = 0
-	recording.frameSprites = {}
+	recording.skin = getRecordSkin()
+	recording.color = getRecordColor()
 
 	return recording;
 end
 
+function getRecordSkin()
+
+	if #RecordCharacterUnusedSprites == 0 then
+		RecordCharacterUnusedSprites = {}
+
+		for i = 1, ReplayCharacterSpriteCount do
+			RecordCharacterUnusedSprites[i] = i
+	    end
+
+	end	
+
+	local spriteIndex = math.random(1, #RecordCharacterUnusedSprites)
+	local sprite = RecordCharacterUnusedSprites[spriteIndex]
+	table.remove(RecordCharacterUnusedSprites, spriteIndex)
+
+	return sprite
+end
+
+function getRecordColor()
+	return RecordColors[math.random(1, #RecordColors)]
+end
+
 function recordCurrentFrame(record)
 
-	local animIndex = readCharacterAnimationSprite()
-	local animDirection = readCharacterAnimationDirection()
-
-	table.insert(record.frames, newFrame(marioX, marioY, animIndex, animDirection));
+	record.frames[#record.frames + 1] = newFrame(marioX, marioY, 
+		readCharacterAnimationSprite(), 
+		readCharacterAnimationDirection());
 
 	record.fitness = fitness
 	record.hash = record.hash + marioX * marioY
 end
 
-function saveRecordInList(record, list)
-	if isRecordExistsInList(record, list) then return end
-	table.insert(list, record)
-end	
-
 function saveGenerationRecord(record)
-	if isRecordExistsInList(record, RecordsList) then return end
-	table.insert(RecordsList, record)
-	updateRecordSpriteList(record)
-	if #RecordsList > MaxRecords then
-		table.remove(RecordsList, 1)
+
+	for i, record in pairs(GenerationRecordsList) do
+		if isRecordsSame(record, CurrentRecord) then return end
 	end
 
-	emu.print("New unique record added to record list (" .. record.hash .. "), " .. table.getn(RecordsList) .. " total" )
-end
+	table.insert(GenerationRecordsList, record)
 
-function updateRecordSpriteList(record)
-	record.frameSprites = {}
-	for i, frame in ipairs(record.frames) do
-		table.insert(record.frameSprites, getCharacterSprite(frame.animation, frame.direction, record.skin))
-	end	
+	if #GenerationRecordsList > MaxGenerationRecords then
+		table.remove(GenerationRecordsList, 1)
+	end
+
+	emu.print("New unique record #" .. record.hash .. " added to record list " .. #GenerationRecordsList .. " total" )
 end
 
 -- Record playback functions
 
+function addRecordToPlayback(record)
+
+	for i, playback in ipairs(PlayingRecordsList) do
+		if isRecordsSame(playback.record, record) then return end -- record is not unique
+	end	
+
+	local playback = {}
+
+	playback.record = record
+	playback.currentFrame = 0
+	playback.totalFrames = #record.frames
+	playback.frameSprites = {}
+
+	for i, frame in ipairs(record.frames) do
+		table.insert(playback.frameSprites, getCharacterSprite(frame.animation, frame.direction, record.skin))
+	end
+
+	table.insert(PlayingRecordsList, playback)
+
+	if #PlayingRecordsList > MaxPlayedRecords then
+		table.remove(PlayingRecordsList, 1)
+	end
+end
+
 function resetPlaybackFrames()
-	for i, record in ipairs(RecordsList) do
-		record.playbackFrame = 1
+	for i, playback in ipairs(PlayingRecordsList) do
+		playback.currentFrame = 1
 	end	
 end
 
 function updatePlaybackFrame(currentFrame)
-	for i, record in ipairs(RecordsList) do
+	for i, playback in ipairs(PlayingRecordsList) do
 
 		if SynchronizedPlayback then
-			record.playbackFrame = currentFrame
+			playback.currentFrame = currentFrame
 		else
-			record.playbackFrame = record.playbackFrame + 1
-			if  #record.frames + DissolveAnimationFrames < record.playbackFrame then
-				record.playbackFrame = 1
+			playback.currentFrame = playback.currentFrame + 1
+			if playback.totalFrames + DissolveAnimationFrames < playback.currentFrame then
+				playback.currentFrame = 1
 			end
 		end
 	end	
@@ -279,21 +327,21 @@ end
 
 -- Record drawing functions
 
-function forEachRecord(func)
+function forEachPlayingRecord(func)
 
 	local xScreenOffset = marioX - screenX
 	local yScreenOffset = marioY - screenY
 
-	for i, record in pairs(RecordsList) do
+	for i, playback in pairs(PlayingRecordsList) do
 
-		local currentFrame = record.playbackFrame
+		local currentFrame = playback.currentFrame
 		local lastFrame = currentFrame
 		local firstFrame = currentFrame - RecordTrailFrameCount
-		local frameCount = #record.frames
+		local frameCount = playback.totalFrames
 
 		if lastFrame > frameCount then lastFrame = frameCount end
 
-		func(record, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
+		func(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
 	end	
 end
 
@@ -309,10 +357,11 @@ function calculateProximityOpacity(frameData)
 	return opacityScale
 end
 
-function drawRecordTrail(record, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
+function drawRecordTrail(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
 	local prevXPosition
 	local prevYPosition
 
+	local record = playback.record
 	local firstFrame = currentFrame - RecordTrailFrameCount
 
 	if firstFrame > lastFrame then firstFrame = lastFrame end
@@ -337,12 +386,13 @@ function drawRecordTrail(record, lastFrame, currentFrame, xScreenOffset, yScreen
 	end
 end
 
-function drawRecordBox(record, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
+function drawRecordBox(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
 
+	local record = playback.record
 	local frameData = record.frames[lastFrame]
 	local xPosition = frameData.x - xScreenOffset + 8
 	local yPosition = frameData.y - yScreenOffset + 24
-	local frameCount = #record.frames
+	local frameCount = playback.totalFrames
 
 	if isInScreenBounds(xPosition, yPosition, 12) and (frameCount + DissolveAnimationFrames) > currentFrame then 
 
@@ -362,16 +412,17 @@ function drawRecordBox(record, lastFrame, currentFrame, xScreenOffset, yScreenOf
 	end	
 end
 
-function drawRecordCharacter(record, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
+function drawRecordCharacter(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
 	
+	local record = playback.record
 	local frameData = record.frames[lastFrame]
 	local xPosition = frameData.x - xScreenOffset - 4
 	local yPosition = frameData.y - yScreenOffset + 9	
-	local animImage = record.frameSprites[lastFrame]
-	local frameCount = #record.frames
+	local animImage = playback.frameSprites[lastFrame]
+	local frameCount = playback.totalFrames
 	local proximityScale = calculateProximityOpacity(frameData)
 
-	if isInScreenBounds(xPosition, yPosition, 24) and (frameCount + DissolveAnimationFrames) > currentFrame then
+	if isInScreenBounds(xPosition, yPosition, 24) and (frameCount + DissolveAnimationFrames) > currentFrame and animImage then
 		
 		if frameCount > currentFrame then
 			gui.opacity(proximityScale)
@@ -384,17 +435,17 @@ function drawRecordCharacter(record, lastFrame, currentFrame, xScreenOffset, ySc
 	end
 end
 
-function drawRecords() 
+function drawPlayingRecords() 
 	if DrawRecordTrail then
-		forEachRecord(drawRecordTrail)
+		forEachPlayingRecord(drawRecordTrail)
 	end
 
 	if DrawRecordAsBox then
-		forEachRecord(drawRecordBox)
+		forEachPlayingRecord(drawRecordBox)
 	end	
 
 	if DrawRecordAsSprite then
-		forEachRecord(drawRecordCharacter)
+		forEachPlayingRecord(drawRecordCharacter)
 	end	
 end
 
@@ -408,24 +459,35 @@ function isInScreenBounds(x, y, radius)
 	return x > -radius and x < 256 + radius and y > -radius and y < 256 + radius
 end
 
-function isRecordExistsInList(record, list)
-	local alreadyExists = false
-
-	for i, record in pairs(list) do
-		if isRecordsSame(record, CurrentRecord) then alreadyExists = true break end
-	end
-
-	return alreadyExists
-end
-
 function isRecordsSame(record1, record2)
 	return record1.hash == record2.hash and record1.fitness == record2.fitness and #record1.frames == #record2.frames
 end	
 
+-- Events
+
+function onNewRecord()
+	if SynchronizedPlayback then resetPlaybackFrames() end
+	return newRecording();
+end
+
+function onRecordCompleted(record)
+	saveGenerationRecord(record)
+	addRecordToPlayback(record)
+end
+
+function onEachFrame(currentRecord, currentFrame)
+	recordCurrentFrame(currentRecord)
+	updatePlaybackFrame(currentFrame);
+end
+
+function onDraw()
+	drawPlayingRecords()
+end
+
 -- Initialization
 
 loadCharacterSprites()
-gui.register(drawRecords)
+gui.register(onDraw)
 
 -- Original algorithm
 
@@ -1191,8 +1253,7 @@ function clearJoypad()
 end
 
 function initializeRun()
-	if SynchronizedPlayback then resetPlaybackFrames() end
-	CurrentRecord = newRecording();
+	CurrentRecord = onNewRecord()
 
 	savestate.load(SavestateObj);
 	rightmost = 0
@@ -1572,7 +1633,7 @@ while true do
 		while fitnessAlreadyMeasured() do
 			nextGenome()
 		end
-		saveGenerationRecord(CurrentRecord)
+		onRecordCompleted(CurrentRecord)
 		initializeRun()
 	end
 
@@ -1594,10 +1655,7 @@ while true do
 	end
 
 	pool.currentFrame = pool.currentFrame + 1
-	recordCurrentFrame(CurrentRecord)
-	updatePlaybackFrame(pool.currentFrame);
-
-	--drawRecordCharacter(CurrentRecord, pool.currentFrame, pool.currentFrame, marioX - screenX, 16)
+	onEachFrame(CurrentRecord, pool.currentFrame)
 
 	processMouseClicks()
 	emu.frameadvance();
