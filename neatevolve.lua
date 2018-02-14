@@ -279,6 +279,10 @@ function saveGenerationRecord(record)
 	emu.print("New unique record #" .. record.hash .. " added to record list " .. #GenerationRecordsList .. " total" )
 end
 
+function clearGenerationRecords()
+	GenerationRecordsList = {}
+end
+
 -- Record playback functions
 
 function addRecordToPlayback(record)
@@ -323,6 +327,10 @@ function updatePlaybackFrame(currentFrame)
 			end
 		end
 	end	
+end
+
+function clearPlayingkRecords()
+	PlayingRecordsList = {}
 end
 
 -- Record drawing functions
@@ -465,6 +473,11 @@ end
 
 -- Events
 
+function onRestart()
+	clearPlayingkRecords()
+	clearGenerationRecords()
+end	
+
 function onNewRecord()
 	if SynchronizedPlayback then resetPlaybackFrames() end
 	return newRecording();
@@ -508,6 +521,7 @@ function processMouseClicks()
 			playTop()
 		elseif keys.xmouse >= 222 and keys.xmouse <= 255 and keys.ymouse >= 19 and keys.ymouse <= 25 and SHOW_BANNER then
 			if input.popup("Are you sure you want to restart?") == "yes" then
+				onRestart()
 				initializePool()
 			else
 				return
@@ -532,6 +546,7 @@ function toRGBA(ARGB)
 end
 
 function isDead()
+
 	local playerState = memory.readbyte(0x000E)
 
 	return playerState == 0x0B or 		-- Dying
@@ -1607,14 +1622,23 @@ while true do
 	timeout = timeout - 1
 
 	local timeoutBonus = pool.currentFrame / 4
-	if timeout + timeoutBonus <= 0 or isDead() then
+	local isDead = isDead()
+
+	if timeout + timeoutBonus <= 0 or isDead then
 		local fitness = rightmost - pool.currentFrame / 2
+
 		if rightmost > 3186 then
 			fitness = fitness + 1000
 		end
+
+		if isDead then
+			fitness = fitness - 250
+		end
+
 		if fitness == 0 then
 			fitness = -1
 		end
+
 		genome.fitness = fitness
 
 		if fitness > pool.maxFitness then
