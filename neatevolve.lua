@@ -109,13 +109,7 @@ ReplayCharacterFrameNames = {
 	"jump", 
 	"skid", 
 	"climb1", 
-	"climb2", 
-	"swim1", 
-	"swim2", 
-	"swim3", 
-	"swim4", 
-	"swim5", 
-	"swim6" 
+	"climb2",
 }
 ReplayCharacterSprites = {} -- table which hold every loaded sprite
 RecordCharacterUnusedSprites = {} -- table used by random skin generator, to track which skins are unused, to prevent duplicates
@@ -140,7 +134,7 @@ function getCharacterSpriteName(animFrame, mirrored, character)
 
 	local side = "_r_"
 
-	if mirrored then
+	if mirrored == 1 then
 		side = "_l_"
 	end
 
@@ -166,7 +160,11 @@ end
 -- Player animation detection
 
 function readCharacterAnimationDirection()
-	return memory.readbyte(0x0033) == 2
+	if memory.readbyte(0x0033) == 2 then 
+		return 1 
+	else 
+		return 0 
+	end
 end
 
 function readCharacterAnimationSprite()
@@ -260,7 +258,7 @@ function recordCurrentFrame(record)
 		readCharacterAnimationSprite(), 
 		readCharacterAnimationDirection());
 
-	record.fitness = fitness
+	--record.fitness = fitness
 	record.hash = record.hash + marioX * marioY
 end
 
@@ -329,7 +327,7 @@ function updatePlaybackFrame(currentFrame)
 	end	
 end
 
-function clearPlayingkRecords()
+function clearPlayingRecords()
 	PlayingRecordsList = {}
 end
 
@@ -340,7 +338,7 @@ function forEachPlayingRecord(func)
 	local xScreenOffset = marioX - screenX
 	local yScreenOffset = marioY - screenY
 
-	for i, playback in pairs(PlayingRecordsList) do
+	for i, playback in ipairs(PlayingRecordsList) do
 
 		local currentFrame = playback.currentFrame
 		local lastFrame = currentFrame
@@ -457,6 +455,37 @@ function drawPlayingRecords()
 	end	
 end
 
+-- Saving, Loading
+
+function writeRecordsFile(filename, recordList)
+
+	local file = io.open(filename, "w")
+	file:write("1\n") -- format version
+	file:write(#recordList .. "\n")
+	for i, record in ipairs(recordList) do
+		local r, g, b, a = gui.parsecolor(record.color)
+
+		file:write(record.hash .. "\n")
+		file:write(record.fitness .. "\n")
+		file:write(#record.frames .. "\n")
+
+		file:write(record.currentSpecies .. "\n")
+		file:write(record.genome .. "\n")
+		file:write(record.skin .. "\n")
+		file:write(r .. ", " .. g .. ", " .. b .. "," .. a .. "\n")
+
+		for j, frame in ipairs(record.frames) do
+			file:write(frame.x .. " " .. 
+				frame.y .. " " ..
+				frame.animation .. " " .. 
+				frame.direction .. "\n")
+		end	
+	end
+
+	file:close()
+end
+
+
 -- Utility functions
 
 function getProximity(x1, y1, x2, y2)
@@ -474,7 +503,7 @@ end
 -- Events
 
 function onRestart()
-	clearPlayingkRecords()
+	clearPlayingRecords()
 	clearGenerationRecords()
 end	
 
@@ -1632,7 +1661,7 @@ while true do
 		end
 
 		if isDead then
-			fitness = fitness - 250
+			fitness = fitness - 200
 		end
 
 		if fitness == 0 then
