@@ -69,13 +69,8 @@ You can toggle the HUD elements ON/OFF by clicking on them. Turning HUD elements
 ## Changes from SethBling's original script
 Mostly just some gui/HUD stuff that wasn't supported in FCEUX. Otherwise it's quite vanilla. Super Mario World references were removed since FCEUX is NES only. If you know a SNES emulator that runs on linux and supports lua scripting let me know, I'd love to get this working for SMW!
 
-## Known problems, which will be fixed (probably)
-- Replays doesnt track, which world or location you are in, so if you're inside of the pipe, you can see other replays from here
-- Replays doesnt record player direction
-- Not all animation frames recorded (for unknown animations, idle frame is displayed)
-
 ## TODO
-- Fix all known problems
+- Sprites for big mario
 - Recordings backup and export
 - Probably script which allow to playback these replays during normal gameplay
 

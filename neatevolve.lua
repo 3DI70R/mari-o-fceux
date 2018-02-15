@@ -162,7 +162,15 @@ function loadCharacterSprite(animFrame, mirrored, character)
 	ReplayCharacterSprites[index] = img
 end
 
--- Player animation detection
+-- Game data parsing
+
+function getLevelLayout() 
+	return memory.readbyte(0x00e7)
+end	
+
+function isPlayerLoaded()
+	return memory.readbyte(0x06C9) == 0xff and memory.readbyte(0x0490) ~= 0x00 -- TODO: check if this is a proper way to detect that player is loaded into level
+end
 
 function readCharacterAnimationDirection()
 	return memory.readbyte(0x0033) == 2
@@ -198,12 +206,14 @@ end
 
 -- Record management functions
 
-function newFrame(xPosition, yPosition, animation, direction)
+function newFrame(xPosition, yPosition, animation, direction, level, isVisible)
 	local frame = {}
 	frame.x = xPosition
 	frame.y = yPosition
 	frame.animation = animation
 	frame.direction = direction
+	frame.level = level
+	frame.isVisible = isVisible
 	return frame
 end
 
@@ -234,7 +244,9 @@ function recordCurrentFrame(record)
 
 	record.frames[#record.frames + 1] = newFrame(marioX, marioY, 
 		readCharacterAnimationSprite(), 
-		readCharacterAnimationDirection());
+		readCharacterAnimationDirection(),
+		getLevelLayout(),
+		isPlayerLoaded());
 
 	--record.fitness = fitness
 	record.hash = record.hash + marioX * marioY
@@ -342,31 +354,40 @@ function calculateProximityOpacity(frameData)
 end
 
 function drawRecordTrail(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
-	local prevXPosition
-	local prevYPosition
 
 	local record = playback.record
 	local firstFrame = currentFrame - RecordTrailFrameCount
 
 	if firstFrame > lastFrame then firstFrame = lastFrame end
 	if firstFrame < 1 then firstFrame = 1 end
+	local currentLayout = getLevelLayout()
+
+	local prevXPosition
+	local prevYPosition
 
 	for frame = firstFrame, lastFrame do
 
 		local frameData = record.frames[frame]
-		local xPosition = frameData.x - xScreenOffset + 8
-		local yPosition = frameData.y - yScreenOffset + 24
 
-		if prevXPosition and (not (xPosition == prevXPosition) or not (yPosition == prevYPosition)) and isInScreenBounds(xPosition, yPosition, 4) then
-			local proximityScale = calculateProximityOpacity(frameData)
-			local colorScale = (frame - firstFrame + 1) / RecordTrailFrameCount
+		if frameData.level == currentLayout and frameData.isVisible then 
+			local xPosition = frameData.x - xScreenOffset + 8
+			local yPosition = frameData.y - yScreenOffset + 24
 
-			gui.opacity(colorScale * proximityScale)
-			gui.line(prevXPosition, prevYPosition, xPosition, yPosition, record.color, false)
+			if prevXPosition and (xPosition ~= prevXPosition or yPosition ~= prevYPosition) and isInScreenBounds(xPosition, yPosition, 4) then
+
+				local proximityScale = calculateProximityOpacity(frameData)
+				local colorScale = (frame - firstFrame + 1) / RecordTrailFrameCount
+
+				gui.opacity(colorScale * proximityScale)
+				gui.line(prevXPosition, prevYPosition, xPosition, yPosition, record.color, false)
+			end	
+
+			prevXPosition = xPosition
+			prevYPosition = yPosition
+		else
+			prevXPosition = nil
+			prevYPosition = nil
 		end	
-
-		prevXPosition = xPosition
-		prevYPosition = yPosition
 	end
 end
 
@@ -374,6 +395,10 @@ function drawRecordBox(playback, lastFrame, currentFrame, xScreenOffset, yScreen
 
 	local record = playback.record
 	local frameData = record.frames[lastFrame]
+	local currentLayout = getLevelLayout()
+
+	if not frameData.isVisible or frameData.level ~= currentLayout then return end
+
 	local xPosition = frameData.x - xScreenOffset + 8
 	local yPosition = frameData.y - yScreenOffset + 24
 	local frameCount = playback.totalFrames
@@ -400,6 +425,10 @@ function drawRecordCharacter(playback, lastFrame, currentFrame, xScreenOffset, y
 	
 	local record = playback.record
 	local frameData = record.frames[lastFrame]
+	local currentLayout = getLevelLayout()
+
+	if not frameData.isVisible or frameData.level ~= currentLayout then return end
+
 	local xPosition = frameData.x - xScreenOffset - 4
 	local yPosition = frameData.y - yScreenOffset + 9	
 	local animImage = playback.frameSprites[lastFrame]
@@ -419,7 +448,12 @@ function drawRecordCharacter(playback, lastFrame, currentFrame, xScreenOffset, y
 	end
 end
 
-function drawPlayingRecords() 
+function drawPlayingRecords()
+
+	if not isPlayerLoaded() then
+		return -- if player is not loaded, then probably it is a blank screen, so dont display replays here
+	end
+
 	if DrawRecordTrail then
 		forEachPlayingRecord(drawRecordTrail)
 	end
@@ -490,6 +524,10 @@ function onNewRecord()
 	return newRecording();
 end
 
+function onNewGeneration() 
+	-- noop
+end
+
 function onRecordCompleted(record)
 	saveGenerationRecord(record)
 	addRecordToPlayback(record)
@@ -501,6 +539,7 @@ function onEachFrame(currentRecord, currentFrame)
 end
 
 function onDraw()
+	getPositions()
 	drawPlayingRecords()
 end
 
@@ -1252,6 +1291,7 @@ function newGeneration()
 
 	pool.generation = pool.generation + 1
 
+	onNewGeneration();
 	writeFile("backups/backup." .. pool.generation .. "." .. SAVE_LOAD_FILE)
 end
 
