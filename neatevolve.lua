@@ -100,19 +100,24 @@ GenerationRecordsList = {}
 PlayingRecordsList = {}
 CurrentRecord = {}
 
+ReplayCharacterSprites = {} -- table which hold every loaded sprite
 ReplayCharacterSpriteCount = 160 -- amount of characters in sprites folder
 ReplayCharacterFrameNames = { 
-	"idle", 
-	"walk1", 
-	"walk2", 
-	"walk3", 
-	"jump", 
-	"skid", 
-	"climb1", 
-	"climb2",
+	"idle", 	-- 1
+	"walk1", 	-- 2
+	"walk2", 	-- 3
+	"walk3", 	-- 4
+	"jump", 	-- 5
+	"skid", 	-- 6
+	"climb1", 	-- 7
+	"climb2", 	-- 8
+	"swim1", 	-- 9
+	"swim2", 	-- 10
+	"swim3", 	-- 11
+	"swim4", 	-- 12
+	"swim5", 	-- 13
+	"swim6" 	-- 14
 }
-ReplayCharacterSprites = {} -- table which hold every loaded sprite
-RecordCharacterUnusedSprites = {} -- table used by random skin generator, to track which skins are unused, to prevent duplicates
 
 -- Sprite management functions
 
@@ -134,7 +139,7 @@ function getCharacterSpriteName(animFrame, mirrored, character)
 
 	local side = "_r_"
 
-	if mirrored == 1 then
+	if mirrored then
 		side = "_l_"
 	end
 
@@ -160,46 +165,33 @@ end
 -- Player animation detection
 
 function readCharacterAnimationDirection()
-	if memory.readbyte(0x0033) == 2 then 
-		return 1 
-	else 
-		return 0 
-	end
+	return memory.readbyte(0x0033) == 2
 end
 
 function readCharacterAnimationSprite()
 
-	local anim = memory.readbyte(0x0221)
+	local anim = memory.readbyte(0x06d5)
+	local swimLegs = 0
 
-	if anim == 0x38 or anim == 0x39
-	or anim == 0x06 or anim == 0x07
-	then return 2 end -- walk1
+	if AND(memory.readbyte(0x0009), 0x04) == 0x04 then
+		swimLegs = 1
+	end
 
-	if anim == 0x3b or anim == 0x3c 
-	or anim == 0x16 or anim == 0x17
-	then return 3 end -- walk2
+	if anim == 0x68 or anim == 0x00 then return 2 end -- walk1
+	if anim == 0x70 or anim == 0x10 then return 3 end -- walk2
+	if anim == 0x60 or anim == 0x08 then return 4 end -- walk3
+	if anim == 0x80 or anim == 0x20 then return 5 end -- jump
+	if anim == 0x78 or anim == 0x18 then return 6 end -- skid
+	if anim == 0xa0 or anim == 0x40 then return 7 end -- climb2
+	if anim == 0xa8 or anim == 0x48 then return 8 end -- climb2
 
-	if anim == 0x34 or anim == 0x35
-	or anim == 0x0e or anim == 0x0f
-	then return 4 end -- walk3
+	if anim == 0x88 or anim == 0x28 then return 9 + swimLegs end -- swim1 or swim2
+	if anim == 0x90 or anim == 0x30 then return 11 + swimLegs end -- swim3 or swim4
+	if anim == 0x98 or anim == 0x38 then return 13 + swimLegs end -- swim5 or swim6
 
-	if anim == 0x42 or anim == 0x43
-	or anim == 0x26 or anim == 0x27
-	then return 5 end -- jump
-
-	if anim == 0x3f or anim == 0x40 
-	or anim == 0x1e or anim == 0x1f
-	then return 6 end -- skid
-
-	if anim == 0x90 or anim == 0x91
-	or anim == 0x5c or anim == 0x5d
-	then return 7 end -- climb1
-
-	if anim == 0x92 or anim == 0x93
-	or anim == 0x5e or anim == 0x5f
-	then return 8 end -- climb2
-
-	-- 9f - dead
+	-- if anim == 0x50 ... crouch
+	-- if anim == 0x58 ... fire
+	-- if anim == 0xe0 ... dead
 
 	return 1
 end
@@ -231,21 +223,7 @@ function newRecording()
 end
 
 function getRecordSkin()
-
-	if #RecordCharacterUnusedSprites == 0 then
-		RecordCharacterUnusedSprites = {}
-
-		for i = 1, ReplayCharacterSpriteCount do
-			RecordCharacterUnusedSprites[i] = i
-	    end
-
-	end	
-
-	local spriteIndex = math.random(1, #RecordCharacterUnusedSprites)
-	local sprite = RecordCharacterUnusedSprites[spriteIndex]
-	table.remove(RecordCharacterUnusedSprites, spriteIndex)
-
-	return sprite
+	return math.random(1, ReplayCharacterSpriteCount)
 end
 
 function getRecordColor()
