@@ -40,6 +40,7 @@ SAVESTATE_SLOT = 1
 -- #############################################################################
 
 SAVE_LOAD_FILE = "SMB1-1.state.pool"
+RECORD_LOAD_FILE = "SMB1-1.rec"
 
 os.execute("mkdir backups")
 
@@ -82,7 +83,7 @@ MaxNodes = 1000000
 
 -- recording
 
-MaxGenerationRecords = 1024 -- max record amount for each generation
+SaveGenerationRecords = false
 MaxPlayedRecords = 1024 -- max simultaneously displaying records
 SynchronizedPlayback = false -- should all records play simultaneously
 
@@ -220,9 +221,9 @@ end
 function newRecording()
 	local recording = {}
 
-	recording.generation = pool.generation
-	recording.currentSpecies = pool.currentSpecies
-	recording.genome = pool.currentGenome
+	recording.generation = 0
+	recording.species = 0
+	recording.genome = 0
 	recording.fitness = 0
 	recording.hash = 0
 	recording.frames = {}
@@ -241,34 +242,32 @@ function getRecordColor()
 end
 
 function recordCurrentFrame(record)
-
 	record.frames[#record.frames + 1] = newFrame(marioX, marioY, 
 		readCharacterAnimationSprite(), 
 		readCharacterAnimationDirection(),
 		getLevelLayout(),
 		isPlayerLoaded());
-
-	--record.fitness = fitness
 	record.hash = record.hash + marioX * marioY
 end
 
-function saveGenerationRecord(record)
+function saveGenerationRecord(record, generation, species, genome, fitness)
+
+	record.generation = generation
+	record.species = species
+	record.genome = genome
+	record.fitness = fitness
 
 	for i, record in pairs(GenerationRecordsList) do
 		if isRecordsSame(record, CurrentRecord) then return end
 	end
 
 	table.insert(GenerationRecordsList, record)
-
-	if #GenerationRecordsList > MaxGenerationRecords then
-		table.remove(GenerationRecordsList, 1)
-	end
-
 	emu.print("New unique record #" .. record.hash .. " added to record list " .. #GenerationRecordsList .. " total" )
 end
 
 function clearGenerationRecords()
 	GenerationRecordsList = {}
+	collectgarbage()
 end
 
 -- Record playback functions
@@ -469,28 +468,42 @@ end
 
 -- Saving, Loading
 
+function writeRecordsBackupFile()
+	writeRecordsFile("backups/backup." .. pool.generation .. "." .. RECORD_LOAD_FILE, GenerationRecordsList)
+end
+
 function writeRecordsFile(filename, recordList)
 
 	local file = io.open(filename, "w")
-	file:write("1\n") -- format version
+	file:write("2\n") -- format version
 	file:write(#recordList .. "\n")
 	for i, record in ipairs(recordList) do
 		local r, g, b, a = gui.parsecolor(record.color)
+		file:write("--- record [" .. i .. "] ---\n")
 
 		file:write(record.hash .. "\n")
 		file:write(record.fitness .. "\n")
 		file:write(#record.frames .. "\n")
 
-		file:write(record.currentSpecies .. "\n")
+		file:write(record.generation .. "\n")
+		file:write(record.species .. "\n")
 		file:write(record.genome .. "\n")
 		file:write(record.skin .. "\n")
-		file:write(r .. ", " .. g .. ", " .. b .. "," .. a .. "\n")
+		file:write(r .. ", " .. g .. ", " .. b .. ", " .. a .. "\n")
 
 		for j, frame in ipairs(record.frames) do
-			file:write(frame.x .. " " .. 
-				frame.y .. " " ..
-				frame.animation .. " " .. 
-				frame.direction .. "\n")
+
+			local anim = -1
+
+			if frame.isVisible then
+				anim = frame.animation
+
+				if frame.direction then 
+					anim = anim + 0x20
+				end
+			end
+
+			file:write(frame.x .. " " .. frame.y .. " " .. anim .. " " .. frame.level .. "\n")
 		end	
 	end
 
@@ -524,12 +537,19 @@ function onNewRecord()
 	return newRecording();
 end
 
-function onNewGeneration() 
-	-- noop
+function onNewGeneration()
+	if SaveGenerationRecords then 
+		writeRecordsBackupFile()
+		clearGenerationRecords()
+	end
 end
 
-function onRecordCompleted(record)
-	saveGenerationRecord(record)
+function onRecordCompleted(record, generation, species, genome, fitness)
+
+	if SaveGenerationRecords then
+		saveGenerationRecord(record, generation, species, genome, fitness)
+	end
+
 	addRecordToPlayback(record)
 end
 
@@ -1704,7 +1724,7 @@ while true do
 		while fitnessAlreadyMeasured() do
 			nextGenome()
 		end
-		onRecordCompleted(CurrentRecord)
+		onRecordCompleted(CurrentRecord, pool.generation, pool.currentSpecies, pool.currentGenome, fitness)
 		initializeRun()
 	end
 
