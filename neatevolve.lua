@@ -28,7 +28,6 @@ LOAD_FROM_FILE = nil
 --LOAD_FROM_FILE = "backups/backup.5.SMB1-1.state.pool"
 
 -- HUD options. Use "false" to hide elements (might improve performance).
-SHOW_BANNER = true
 SHOW_NETWORK = true
 SHOW_MUTATION_RATES = true
 
@@ -101,6 +100,7 @@ GenerationRecordsList = {}
 PlayingRecordsList = {}
 CurrentRecord = {}
 
+OverlaySprite = nil
 ReplayCharacterSprites = {} -- table which hold every loaded sprite
 ReplayCharacterSpriteCount = 160 -- amount of characters in sprites folder
 ReplayCharacterFrameNames = { 
@@ -119,8 +119,18 @@ ReplayCharacterFrameNames = {
 	"swim5", 	-- 13
 	"swim6" 	-- 14
 }
+IsMousePressed = false
+IsMouseClicked = false
+IsGUIVisible = true
+GUIVisibility = 1.0 
+MouseX = 0
+MouseY = 0
 
 -- Sprite management functions
+
+function loadGUISprites()
+	OverlaySprite = loadSprite("overlay")
+end
 
 function loadCharacterSprites()
 	for c = 1, ReplayCharacterSpriteCount do
@@ -155,12 +165,14 @@ function loadCharacterSprite(animFrame, mirrored, character)
 
 	local name = getCharacterSpriteName(animFrame, mirrored, character)
 	local index = getCharacterSpriteIndex(animFrame, mirrored, character)
+	ReplayCharacterSprites[index] = loadSprite(name)
+end
 
+function loadSprite(name) 
 	local f = io.open("sprites/" .. name .. ".gd", "rb")
 	local img = f:read("*all")
 	f:close()
-
-	ReplayCharacterSprites[index] = img
+	return img
 end
 
 -- Game data parsing
@@ -262,7 +274,7 @@ function saveGenerationRecord(record, generation, species, genome, fitness)
 	end
 
 	table.insert(GenerationRecordsList, record)
-	emu.print("New unique record #" .. record.hash .. " added to record list " .. #GenerationRecordsList .. " total" )
+	emu.print("New unique record #" .. record.hash .. " added to generation record list, " .. #GenerationRecordsList .. " total" )
 end
 
 function clearGenerationRecords()
@@ -320,12 +332,92 @@ function clearPlayingRecords()
 	PlayingRecordsList = {}
 end
 
+-- GUI Drawing functions
+
+function updateMouseClick()
+	local i = input.get()
+	IsMouseClicked = i.leftclick and i.leftclick ~= IsMousePressed
+	IsMousePressed = i.leftclick
+	MouseX = i.xmouse
+	MouseY = i.ymouse
+end
+
+function togglePanel() 
+	IsGUIVisible = not IsGUIVisible
+end
+
+function toggleNetwork() 
+	SHOW_NETWORK = not SHOW_NETWORK
+end
+
+function toggleMutationRates() 
+	SHOW_MUTATION_RATES = not SHOW_MUTATION_RATES
+end
+
+function drawButton(x, y, w, text, color, onClick)
+	gui.box(x, y, x + w, y + 8, color, color)
+	gui.text(x + 1, y + 1, text, "white", "clear")
+
+	if IsGUIVisible then
+		checkButton(x, y, w, 8, onClick)
+	end
+end
+
+function drawShadedText(x, y, text)
+	gui.text(x + 1, y + 1, text, { 0, 0, 0, 128 }, "clear")
+	gui.text(x, y, text, "white", "clear")
+end
+
+function checkButton(x, y, w, h, onClick)
+	if IsMouseClicked and MouseX >= x and MouseX < x + w and MouseY >= y and MouseY < y + h then
+		onClick()
+		IsMouseClicked = false
+	end
+end
+
+function updateGUIVisibility()
+	if IsGUIVisible then
+		if GUIVisibility < 1 then
+			GUIVisibility = GUIVisibility + 0.05
+		end
+	else 
+		if GUIVisibility > 0 then 
+			GUIVisibility = GUIVisibility - 0.05
+		end
+	end
+end
+
+function drawGUI() 
+	updateGUIVisibility()
+
+	if GUIVisibility > 0 then
+		gui.opacity(0.3 * GUIVisibility)
+		gui.image(0, 212, OverlaySprite)
+
+		gui.opacity(GUIVisibility)
+		drawShadedText(8, 215, "Gen: " .. pool.generation .. 
+			" Species: " .. pool.currentSpecies .. 
+			" Genome: " .. pool.currentGenome .. 
+			" (" .. getGenerationPercentage() .. "%)")
+
+		drawShadedText(8, 223, "Fitness: " .. math.floor(getFitness()))
+		drawShadedText(80, 223, "/ " .. math.floor(pool.maxFitness))
+
+		drawButton(205, 213, 41, "Play Top", { 0, 255, 0, 96 }, playTop)
+		drawButton(205, 223, 41, "Restart", { 255, 0, 0, 96 }, restart)
+	end
+
+	checkButton(0, 214, 256, 18, togglePanel)
+	checkButton(0, 26, 256, 76, toggleNetwork)
+	checkButton(0, 103, 256, 128, toggleMutationRates)
+end
+
 -- Record drawing functions
 
 function forEachPlayingRecord(func)
 
 	local xScreenOffset = marioX - screenX
-	local yScreenOffset = marioY - screenY
+	local yScreenOffset = 0
 
 	for i, playback in ipairs(PlayingRecordsList) do
 
@@ -561,51 +653,18 @@ end
 function onDraw()
 	getPositions()
 	drawPlayingRecords()
+
+	updateMouseClick()
+	drawGUI()
 end
 
 -- Initialization
 
+loadGUISprites()
 loadCharacterSprites()
 gui.register(onDraw)
 
 -- Original algorithm
-
-CLICK_COOLDOWN = 0	-- Only used in processMouseClicks()
-function processMouseClicks()
-	-- A single mouse click seems to be registered multiple times so wait a bit
-	-- before reading input again.
-	if CLICK_COOLDOWN > 0 then
-		CLICK_COOLDOWN = CLICK_COOLDOWN - 1
-		return
-	end
-
-	local keys = input.get()
-	if keys.click == 1 then
-		CLICK_COOLDOWN = 10
-
-		if keys.xmouse >= 222 and keys.xmouse <= 255 and keys.ymouse >= 8 and keys.ymouse <= 14 and SHOW_BANNER then
-			playTop()
-		elseif keys.xmouse >= 222 and keys.xmouse <= 255 and keys.ymouse >= 19 and keys.ymouse <= 25 and SHOW_BANNER then
-			if input.popup("Are you sure you want to restart?") == "yes" then
-				onRestart()
-				initializePool()
-			else
-				return
-			end
-		elseif keys.xmouse >= 0 and keys.xmouse <= 255 and keys.ymouse >= 0 and keys.ymouse <= 25 then
-			SHOW_BANNER = not SHOW_BANNER
-		elseif keys.xmouse >= 0 and keys.xmouse <= 255 and keys.ymouse >=26 and keys.ymouse <= 102 then
-			SHOW_NETWORK = not SHOW_NETWORK
-		elseif keys.xmouse >= 0 and keys.xmouse <= 255 and keys.ymouse >= 103 and keys.ymouse <= 231 then
-			SHOW_MUTATION_RATES = not SHOW_MUTATION_RATES
-		end
-	end
-end
-
-function drawButtonsFCEUX()
-	gui.drawtext(222, 8, "PlayTop", 0x000000FF, 0x00AA00FF)
-	gui.drawtext(222, 19, "Restart", 0x000000FF, 0xFF0000FF)
-end
 
 function toRGBA(ARGB)
 	return bit.lshift(ARGB, 8) + bit.rshift(ARGB, 24)
@@ -615,22 +674,21 @@ function isDead()
 
 	local playerState = memory.readbyte(0x000E)
 
-	return playerState == 0x0B or 		-- Dying
+	return playerState == 0x0B or 	-- Dying
 		playerState == 0x06 or 		-- Dead
 		memory.readbyte(0x00B5) > 1	-- Below viewport (in pit)
 end
 
 function getPositions()
 	marioX = memory.readbyte(0x6D) * 0x100 + memory.readbyte(0x86)
-	marioY = memory.readbyte(0x03B8)+16
+	marioY = memory.readbyte(0x03B8) + (memory.readbyte(0xB5) - 1) * 0xFF
 
 	screenX = memory.readbyte(0x03AD)
-	screenY = memory.readbyte(0x03B8)
 end
 
 function getTile(dx, dy)
 	local x = marioX + dx + 8
-	local y = marioY + dy - 16
+	local y = marioY + dy
 	local page = math.floor(x/256)%2
 
 	local subx = math.floor((x%256)/16)
@@ -674,13 +732,13 @@ function getInputs()
 			inputs[#inputs+1] = 0
 
 			tile = getTile(dx, dy)
-			if tile == 1 and marioY+dy < 0x1B0 then
+			if tile == 1 and marioY+dy + 16 < 0x1B0 then
 				inputs[#inputs] = 1
 			end
 
 			for i = 1,#sprites do
 				distx = math.abs(sprites[i]["x"] - (marioX+dx))
-				disty = math.abs(sprites[i]["y"] - (marioY+dy))
+				disty = math.abs(sprites[i]["y"] - (marioY+dy + 16))
 				if distx <= 8 and disty <= 8 then
 					inputs[#inputs] = -1
 				end
@@ -1632,6 +1690,14 @@ function playTop()
 	return
 end
 
+function restart()
+	if input.popup("Are you sure you want to restart?") == "yes" then
+		onRestart()
+		initializePool()
+	end
+end
+
+
 --function onExit()
 	--forms.destroy(form)
 --end
@@ -1658,14 +1724,44 @@ if LOAD_FROM_FILE then
 	loadPool()
 end
 
+function getFitness()
+
+	local fitness = rightmost - pool.currentFrame / 2
+
+	if rightmost > 3186 then
+		fitness = fitness + 1000
+	end
+
+	if isDead() then
+		fitness = fitness - 200
+	end
+
+	if fitness == 0 then
+		fitness = -1
+	end
+
+	return fitness
+end
+
+function getGenerationPercentage()
+
+	local measured = 0
+	local total = 0
+	for _,species in pairs(pool.species) do
+		for _,genome in pairs(species.genomes) do
+			total = total + 1
+			if genome.fitness ~= 0 then
+				measured = measured + 1
+			end
+		end
+	end
+
+	return math.floor(measured / total * 100)
+end
+
 while true do
 
 	gui.opacity(1)
-
-	local backgroundColor = 0xFFFFFFFF
-	if SHOW_BANNER then
-		gui.drawbox(0, 8, 255, 25, toRGBA(backgroundColor), toRGBA(backgroundColor))
-	end
 
 	local species = pool.species[pool.currentSpecies]
 	local genome = species.genomes[pool.currentGenome]
@@ -1689,23 +1785,10 @@ while true do
 	timeout = timeout - 1
 
 	local timeoutBonus = pool.currentFrame / 4
-	local isDead = isDead()
 
-	if timeout + timeoutBonus <= 0 or isDead then
-		local fitness = rightmost - pool.currentFrame / 2
-
-		if rightmost > 3186 then
-			fitness = fitness + 1000
-		end
-
-		if isDead then
-			fitness = fitness - 200
-		end
-
-		if fitness == 0 then
-			fitness = -1
-		end
-
+	if timeout + timeoutBonus <= 0 or isDead() then
+		
+		local fitness = getFitness()
 		genome.fitness = fitness
 
 		if fitness > pool.maxFitness then
@@ -1728,26 +1811,8 @@ while true do
 		initializeRun()
 	end
 
-	local measured = 0
-	local total = 0
-	for _,species in pairs(pool.species) do
-		for _,genome in pairs(species.genomes) do
-			total = total + 1
-			if genome.fitness ~= 0 then
-				measured = measured + 1
-			end
-		end
-	end
-	if SHOW_BANNER then
-		gui.drawtext(1, 9, "Gen: " .. pool.generation .. " Species: " .. pool.currentSpecies .. " Genome: " .. pool.currentGenome .. " (" .. math.floor(measured/total*100) .. "%)", toRGBA(0xFF000000), 0x0)
-		gui.drawtext(1, 18, "Fitness: " .. math.floor(rightmost - (pool.currentFrame / 2)), toRGBA(0xFF000000), 0x0)
-		gui.drawtext(100, 18, "Max Fitness: " .. math.floor(pool.maxFitness), toRGBA(0xFF000000), 0x0)
-		drawButtonsFCEUX()
-	end
-
 	pool.currentFrame = pool.currentFrame + 1
 	onEachFrame(CurrentRecord, pool.currentFrame)
 
-	processMouseClicks()
 	emu.frameadvance();
 end
