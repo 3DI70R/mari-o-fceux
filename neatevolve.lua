@@ -352,9 +352,10 @@ end
 function updateGUIInput()
 
 	local i = input.get()
-	IsMouseClicked = i.leftclick and i.leftclick ~= IsMousePressed
-	IsMouseReleased = not i.leftclick and i.leftclick ~= IsMousePressed
-	IsMousePressed = i.leftclick
+	local pressed = i.click == 1
+	IsMouseClicked = pressed and pressed ~= IsMousePressed
+	IsMouseReleased = not pressed and pressed ~= IsMousePressed
+	IsMousePressed = pressed
 	MouseX = i.xmouse
 	MouseY = i.ymouse
 
