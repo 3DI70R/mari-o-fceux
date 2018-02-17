@@ -82,7 +82,7 @@ MaxNodes = 1000000
 
 -- recording
 
-SaveGenerationRecords = false
+SaveGenerationRecords = false -- save unique replays for each generation to disk
 MaxPlayedRecords = 1024 -- max simultaneously displaying records
 SynchronizedPlayback = false -- should all records play simultaneously
 
@@ -100,7 +100,9 @@ GenerationRecordsList = {}
 PlayingRecordsList = {}
 CurrentRecord = {}
 
-OverlaySprite = nil
+CheckboxOnSprite = nil
+CheckboxOffSprite = nil
+SettingsButtonSprite = nil
 ReplayCharacterSprites = {} -- table which hold every loaded sprite
 ReplayCharacterSpriteCount = 160 -- amount of characters in sprites folder
 ReplayCharacterFrameNames = { 
@@ -120,16 +122,23 @@ ReplayCharacterFrameNames = {
 	"swim6" 	-- 14
 }
 IsMousePressed = false
+IsMouseReleased = false
 IsMouseClicked = false
 IsGUIVisible = true
+IsSettingsOpened = false
 GUIVisibility = 1.0 
+GUIOffset = 0
+FocusedControlId = -1
+CurrentControlId = 0
 MouseX = 0
 MouseY = 0
 
 -- Sprite management functions
 
 function loadGUISprites()
-	OverlaySprite = loadSprite("overlay")
+	CheckboxOnSprite = loadSprite("checkbox_on")
+	CheckboxOffSprite = loadSprite("checkbox_off")
+	SettingsButtonSprite = loadSprite("settings_button")
 end
 
 function loadCharacterSprites()
@@ -320,8 +329,14 @@ function updatePlaybackFrame(currentFrame)
 		if SynchronizedPlayback then
 			playback.currentFrame = currentFrame
 		else
+			local respawnDelay = DissolveAnimationFrames
+
+			if DrawRecordTrail then
+				respawnDelay = math.max(DissolveAnimationFrames, RecordTrailFrameCount)
+			end
+
 			playback.currentFrame = playback.currentFrame + 1
-			if playback.totalFrames + DissolveAnimationFrames < playback.currentFrame then
+			if playback.totalFrames + respawnDelay < playback.currentFrame then
 				playback.currentFrame = 1
 			end
 		end
@@ -334,48 +349,105 @@ end
 
 -- GUI Drawing functions
 
-function updateMouseClick()
+function updateGUIInput()
+
 	local i = input.get()
 	IsMouseClicked = i.leftclick and i.leftclick ~= IsMousePressed
+	IsMouseReleased = not i.leftclick and i.leftclick ~= IsMousePressed
 	IsMousePressed = i.leftclick
 	MouseX = i.xmouse
 	MouseY = i.ymouse
+
+	if IsMouseReleased then 
+		FocusedControlId = -1
+	end
+	CurrentControlId = 0
 end
 
-function togglePanel() 
-	IsGUIVisible = not IsGUIVisible
-end
-
-function toggleNetwork() 
-	SHOW_NETWORK = not SHOW_NETWORK
-end
-
-function toggleMutationRates() 
-	SHOW_MUTATION_RATES = not SHOW_MUTATION_RATES
-end
-
-function drawButton(x, y, w, text, color, onClick)
+function drawButton(x, y, w, text, color)
 	gui.box(x, y, x + w, y + 8, color, color)
 	gui.text(x + 1, y + 1, text, "white", "clear")
 
 	if IsGUIVisible then
-		checkButton(x, y, w, 8, onClick)
+		return checkButton(x, y, w, 8)
 	end
+
+	return false
 end
 
-function drawShadedText(x, y, text)
+function drawSlider(x, y, w, value, minValue, maxValue, text)
+
+	if not text then text = "" end
+
+	gui.box(x, y, x + w, y + 8, { 0, 0, 0, 128 }, "white")
+	local offset = 1 + ((value - minValue) / (maxValue - minValue)) * (w - 2)
+	local t = 0
+
+	if checkButton(x, y, w, 8, true) then
+		t = (MouseX - x - 1) / (w - 2)
+
+		if t < 0 then t = 0 end
+		if t > 1 then t = 1 end
+
+		value = math.floor(minValue + (maxValue - minValue) * t)
+	end
+
+	gui.text(x + 4, y + 1, value .. " " .. text, "#4CFF00aa", "clear")
+
+	if offset < 1 then offset = 1 end
+	if offset > w - 1 then offset = w - 1 end
+
+	gui.line(x + offset, y + 1, x + offset, y + 7, "#4CFF00")
+
+	return value
+end
+
+function drawCheckbox(x, y, w, isChecked, text)
+
+	if checkButton(x, y, w, 7) then
+		isChecked = not isChecked
+	end
+
+	if isChecked then
+		gui.image(x, y, CheckboxOnSprite)
+	else
+		gui.image(x, y, CheckboxOffSprite)
+	end
+
+	drawShadedText(x + 10, y, text)
+
+	return isChecked
+end
+
+function drawShadedText(x, y, text, color)
+
+	if not color then color = white end
+
 	gui.text(x + 1, y + 1, text, { 0, 0, 0, 128 }, "clear")
-	gui.text(x, y, text, "white", "clear")
+	gui.text(x, y, text, color, "clear")
 end
 
-function checkButton(x, y, w, h, onClick)
-	if IsMouseClicked and MouseX >= x and MouseX < x + w and MouseY >= y and MouseY < y + h then
-		onClick()
-		IsMouseClicked = false
+function checkButton(x, y, w, h, continous)
+
+	local isClicked = IsMouseClicked
+	CurrentControlId = CurrentControlId + 1
+
+	if continous then
+		if FocusedControlId == CurrentControlId then
+			return true
+		end
 	end
+
+	if isClicked and MouseX >= x and MouseX < x + w and MouseY >= y and MouseY < y + h then
+		IsMouseClicked = false
+		FocusedControlId = CurrentControlId
+		return true
+	end
+
+	return false
 end
 
-function updateGUIVisibility()
+function updateGUIParams()
 	if IsGUIVisible then
 		if GUIVisibility < 1 then
 			GUIVisibility = GUIVisibility + 0.05
@@ -385,31 +457,108 @@ function updateGUIVisibility()
 			GUIVisibility = GUIVisibility - 0.05
 		end
 	end
+
+	local targetOffset = 0
+	if IsSettingsOpened then targetOffset = -128 end
+	GUIOffset = GUIOffset + (targetOffset - GUIOffset)  * 0.15
+end
+
+function formatFitness(fitness, appendSign) 
+
+	local sign = "+"
+
+	if appendSign then
+		sign = getNumberSign(fitness)
+	else
+		sign = " "
+	end
+
+	return sign .. string.format("%04d", math.abs(math.floor(fitness)))
+end
+
+function getNumberSign(number)
+	if number < 0 then return "-" else return "+" end
 end
 
 function drawGUI() 
-	updateGUIVisibility()
+	updateGUIParams()
+	updateGUIInput()
 
 	if GUIVisibility > 0 then
 		gui.opacity(0.3 * GUIVisibility)
-		gui.image(0, 212, OverlaySprite)
+		gui.box(-1, 211 + GUIOffset, 256, 256, "black", "clear")
 
 		gui.opacity(GUIVisibility)
-		drawShadedText(8, 215, "Gen: " .. pool.generation .. 
+
+		drawShadedText(8, 215 + GUIOffset, "Gen: " .. pool.generation .. 
 			" Species: " .. pool.currentSpecies .. 
 			" Genome: " .. pool.currentGenome .. 
 			" (" .. getGenerationPercentage() .. "%)")
 
-		drawShadedText(8, 223, "Fitness: " .. math.floor(getFitness()))
-		drawShadedText(80, 223, "/ " .. math.floor(pool.maxFitness))
+		
+		local fitness = getFitness()
+		drawShadedText(8, 223 + GUIOffset, "Fitness: " .. formatFitness(fitness, false) .. 
+			" / " .. formatFitness(pool.maxFitness, true))
+		drawShadedText(49, 223 + GUIOffset, getNumberSign(fitness)) -- this is to prevent situation, when rapidly changing +- shakes whole text
 
-		drawButton(205, 213, 41, "Play Top", { 0, 255, 0, 96 }, playTop)
-		drawButton(205, 223, 41, "Restart", { 255, 0, 0, 96 }, restart)
+		drawShadedText(136, 223 + GUIOffset, "Records: " .. math.min(#PlayingRecordsList, MaxPlayedRecords))
+
+		gui.image(232, 214 + GUIOffset, SettingsButtonSprite)
+
+		if IsGUIVisible and checkButton(232, 214 + GUIOffset, 16, 16) then IsSettingsOpened = not IsSettingsOpened end
+
+		if GUIOffset < -0.1 then
+
+			local bottomOffset = 232 + GUIOffset
+
+			gui.opacity(GUIVisibility * 0.3)
+			gui.box(0, bottomOffset, 255, bottomOffset - GUIOffset - 1, "black", "clear")
+			gui.opacity(GUIVisibility)
+
+			drawShadedText(8, 4 + bottomOffset, "Record display options", "red")
+			gui.line(8, 12 + bottomOffset, 112, 12 + bottomOffset, "red")
+
+			DrawRecordAsSprite = drawCheckbox(8, 16 + bottomOffset, 64, DrawRecordAsSprite, "Draw sprite")
+			DrawRecordAsBox = drawCheckbox(8 + 88, 16 + bottomOffset, 64, DrawRecordAsBox, "Draw box")
+			DrawRecordTrail = drawCheckbox(8 + 88 + 88, 16 + bottomOffset , 64, DrawRecordTrail, "Draw trail")
+
+			drawShadedText(8, 26 + bottomOffset, "Trail length: ")
+			RecordTrailFrameCount = drawSlider(96, 26 + bottomOffset, 150, RecordTrailFrameCount, 0, 120, "frames")
+
+			drawShadedText(8, 36 + bottomOffset, "Death fade: ")
+			DissolveAnimationFrames = drawSlider(96, 36 + bottomOffset, 150, DissolveAnimationFrames, 0, 60, "frames")
+
+			drawShadedText(8, 46 + bottomOffset, "Fade distance: ")
+			PlayerCloseFadeDistance = drawSlider(96, 46 + bottomOffset, 150, PlayerCloseFadeDistance, 0, 120, "pixels")
+
+			drawShadedText(8, 58 + bottomOffset, "Record playback options", "red")
+			gui.line(8, 66 + bottomOffset, 120, 66 + bottomOffset, "red")
+
+			SynchronizedPlayback = drawCheckbox(8, 70 + bottomOffset, 64, SynchronizedPlayback, "Synchronous")
+
+			drawShadedText(8, 80 + bottomOffset, "Maximum: ")
+			MaxPlayedRecords = drawSlider(52, 80 + bottomOffset, 194, MaxPlayedRecords, 0, 2048, "records")
+
+			drawShadedText(8, 92 + bottomOffset, "Misc", "red")
+			gui.line(8, 100 + bottomOffset, 27, 100 + bottomOffset, "red")
+
+			SaveGenerationRecords = drawCheckbox(8, 104 + bottomOffset, 96, SaveGenerationRecords, "Save records")
+
+			if drawButton(170, 112 + bottomOffset, 40, "Play Top", { 0, 255, 0, 128 }) then 
+				IsSettingsOpened = false
+				playTop()
+			end
+			if drawButton(212, 112 + bottomOffset, 34, "Restart", { 255, 0, 0, 128 }) then
+				IsSettingsOpened = false
+				restart() 
+			end
+		end
 	end
 
-	checkButton(0, 214, 256, 18, togglePanel)
-	checkButton(0, 26, 256, 76, toggleNetwork)
-	checkButton(0, 103, 256, 128, toggleMutationRates)
+	-- This check order is intentional, so panel will block clicks
+	if checkButton(0, 212 + GUIOffset, 256, 256) and not IsSettingsOpened then IsGUIVisible = not IsGUIVisible end 
+	if checkButton(0, 26, 256, 76) then SHOW_NETWORK = not SHOW_NETWORK end
+	if checkButton(0, 103, 256, 128) then SHOW_MUTATION_RATES = not SHOW_MUTATION_RATES end
 end
 
 -- Record drawing functions
@@ -420,6 +569,8 @@ function forEachPlayingRecord(func)
 	local yScreenOffset = 0
 
 	for i, playback in ipairs(PlayingRecordsList) do
+
+		if i > MaxPlayedRecords then return end
 
 		local currentFrame = playback.currentFrame
 		local lastFrame = currentFrame
@@ -549,12 +700,12 @@ function drawPlayingRecords()
 		forEachPlayingRecord(drawRecordTrail)
 	end
 
-	if DrawRecordAsBox then
-		forEachPlayingRecord(drawRecordBox)
-	end	
-
 	if DrawRecordAsSprite then
 		forEachPlayingRecord(drawRecordCharacter)
+	end
+
+	if DrawRecordAsBox then
+		forEachPlayingRecord(drawRecordBox)
 	end	
 end
 
@@ -632,8 +783,9 @@ end
 function onNewGeneration()
 	if SaveGenerationRecords then 
 		writeRecordsBackupFile()
-		clearGenerationRecords()
 	end
+
+	clearGenerationRecords()
 end
 
 function onRecordCompleted(record, generation, species, genome, fitness)
@@ -654,7 +806,6 @@ function onDraw()
 	getPositions()
 	drawPlayingRecords()
 
-	updateMouseClick()
 	drawGUI()
 end
 
@@ -1569,9 +1720,9 @@ function displayGenome(genome)
 	gui.drawbox(49,71,51,78,toRGBA(0x80FF0000),toRGBA(0x00000000))
 
 	if SHOW_MUTATION_RATES then
-		local pos = 100
+		local pos = 120
 		for mutation,rate in pairs(genome.mutationRates) do
-			gui.drawtext(100, pos, mutation .. ": " .. rate, toRGBA(0xFF000000), 0x0)
+			gui.drawtext(16, pos, mutation .. ": " .. rate, toRGBA(0xFF000000), 0x0)
 			pos = pos + 8
 		end
 	end
