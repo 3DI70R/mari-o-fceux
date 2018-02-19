@@ -25,7 +25,13 @@ If you start FCEUX from the terminal you'll get some usefull debug info.
 Tested on FCEUX 2.2.2 (Ubuntu 16.04). 
 
 ## Configuration
-Currently script can be configured by editing .lua file directly.
+Script have useful GUI which helps to modify settings in real time
+Click on the box on the bottom left corner, to open options menu
+
+<kbd>![Demonstration](gifs/options.png)</kbd>
+
+Theese settings currently isnt stored, so if you want to modify default settings, you should edit .lua script directly
+
 ```
 DrawRecordAsBox = true -- draws record using simple colored box during playback
 DrawRecordTrail = true -- draws record trajectory trail during playback
