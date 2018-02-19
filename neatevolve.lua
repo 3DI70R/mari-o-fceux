@@ -85,6 +85,7 @@ MaxNodes = 1000000
 SaveGenerationRecords = false -- save unique replays for each generation to disk
 MaxPlayedRecords = 1024 -- max simultaneously displaying records
 SynchronizedPlayback = false -- should all records play simultaneously
+PauseAfterDeath = true -- should game pause for some time, so collision with enemy will not end recording abruptly
 
 DrawRecordAsSprite = true -- draw record using character sprite during playback
 DrawRecordAsBox = false -- draw record using simple colored box during playback
@@ -99,6 +100,7 @@ PlayerCloseMaxFade = 0.1 -- maximum fade amount, so record still can be visible,
 GenerationRecordsList = {}
 PlayingRecordsList = {}
 CurrentRecord = {}
+ScriptQueueSchedule = {}
 
 CheckboxOnSprite = nil
 CheckboxOffSprite = nil
@@ -302,7 +304,7 @@ function addRecordToPlayback(record)
 	local playback = {}
 
 	playback.record = record
-	playback.currentFrame = 0
+	playback.currentFrame = 1
 	playback.totalFrames = #record.frames
 	playback.frameSprites = {}
 
@@ -497,7 +499,7 @@ function drawGUI()
 			" (" .. getGenerationPercentage() .. "%)")
 
 		
-		local fitness = getFitness()
+		local fitness = getTotalFitness()
 		drawShadedText(8, 223 + GUIOffset, "Fitness: " .. formatFitness(fitness, false) .. 
 			" / " .. formatFitness(pool.maxFitness, true))
 		drawShadedText(49, 223 + GUIOffset, getNumberSign(fitness)) -- this is to prevent situation, when rapidly changing +- shakes whole text
@@ -520,8 +522,8 @@ function drawGUI()
 			gui.line(8, 12 + bottomOffset, 112, 12 + bottomOffset, "red")
 
 			DrawRecordAsSprite = drawCheckbox(8, 16 + bottomOffset, 64, DrawRecordAsSprite, "Draw sprite")
-			DrawRecordAsBox = drawCheckbox(8 + 88, 16 + bottomOffset, 64, DrawRecordAsBox, "Draw box")
-			DrawRecordTrail = drawCheckbox(8 + 88 + 88, 16 + bottomOffset , 64, DrawRecordTrail, "Draw trail")
+			DrawRecordAsBox = drawCheckbox(96, 16 + bottomOffset, 64, DrawRecordAsBox, "Draw box")
+			DrawRecordTrail = drawCheckbox(184, 16 + bottomOffset , 64, DrawRecordTrail, "Draw trail")
 
 			drawShadedText(8, 26 + bottomOffset, "Trail length: ")
 			RecordTrailFrameCount = drawSlider(96, 26 + bottomOffset, 150, RecordTrailFrameCount, 0, 120, "frames")
@@ -544,16 +546,22 @@ function drawGUI()
 			gui.line(8, 100 + bottomOffset, 27, 100 + bottomOffset, "red")
 
 			SaveGenerationRecords = drawCheckbox(8, 104 + bottomOffset, 96, SaveGenerationRecords, "Save records")
+			PauseAfterDeath = drawCheckbox(8, 112 + bottomOffset, 96, PauseAfterDeath, "Pause after death")
 
 			if drawButton(170, 112 + bottomOffset, 40, "Play Top", { 0, 255, 0, 128 }) then 
 				IsSettingsOpened = false
-				playTop()
+				schedule(playTop)
 			end
 			if drawButton(212, 112 + bottomOffset, 34, "Restart", { 255, 0, 0, 128 }) then
 				IsSettingsOpened = false
-				restart() 
+				schedule(restart)
 			end
 		end
+	end
+
+	if SHOW_NETWORK then
+		gui.opacity(1)
+		displayGenome(getCurrentGenome())
 	end
 
 	-- This check order is intentional, so panel will block clicks
@@ -716,6 +724,10 @@ function writeRecordsBackupFile()
 	writeRecordsFile("backups/backup." .. pool.generation .. "." .. RECORD_LOAD_FILE, GenerationRecordsList)
 end
 
+function writeGenerationBackupFile() 
+	writeFile("backups/backup." .. pool.generation .. "." .. SAVE_LOAD_FILE)
+end
+
 function writeRecordsFile(filename, recordList)
 
 	local file = io.open(filename, "w")
@@ -757,6 +769,10 @@ end
 
 -- Utility functions
 
+function schedule(func)
+	table.insert(ScriptQueueSchedule, func)
+end
+
 function getProximity(x1, y1, x2, y2)
 	return math.max(math.abs(x1 - x2), math.abs(y1 - y2))
 end
@@ -769,52 +785,14 @@ function isRecordsSame(record1, record2)
 	return record1.hash == record2.hash and record1.fitness == record2.fitness and #record1.frames == #record2.frames
 end	
 
--- Events
-
-function onRestart()
-	clearPlayingRecords()
-	clearGenerationRecords()
-end	
-
-function onNewRecord()
-	if SynchronizedPlayback then resetPlaybackFrames() end
-	return newRecording();
-end
-
-function onNewGeneration()
-	if SaveGenerationRecords then 
-		writeRecordsBackupFile()
+function runScheduledFunctions()
+	if #ScriptQueueSchedule ~= 0 then 
+		for i, f in ipairs(ScriptQueueSchedule) do
+			f()
+		end
+		ScriptQueueSchedule = {}
 	end
-
-	clearGenerationRecords()
 end
-
-function onRecordCompleted(record, generation, species, genome, fitness)
-
-	if SaveGenerationRecords then
-		saveGenerationRecord(record, generation, species, genome, fitness)
-	end
-
-	addRecordToPlayback(record)
-end
-
-function onEachFrame(currentRecord, currentFrame)
-	recordCurrentFrame(currentRecord)
-	updatePlaybackFrame(currentFrame);
-end
-
-function onDraw()
-	getPositions()
-	drawPlayingRecords()
-
-	drawGUI()
-end
-
--- Initialization
-
-loadGUISprites()
-loadCharacterSprites()
-gui.register(onDraw)
 
 -- Original algorithm
 
@@ -1520,9 +1498,9 @@ function newGeneration()
 	end
 
 	pool.generation = pool.generation + 1
+	writeGenerationBackupFile()
 
-	onNewGeneration();
-	writeFile("backups/backup." .. pool.generation .. "." .. SAVE_LOAD_FILE)
+	onNewGeneration()
 end
 
 function initializePool()
@@ -1578,11 +1556,6 @@ function evaluateCurrent()
 	joypad.set(1, controller)
 end
 
-if pool == nil then
-	initializePool()
-end
-
-
 function nextGenome()
 	pool.currentGenome = pool.currentGenome + 1
 	if pool.currentGenome > #pool.species[pool.currentSpecies].genomes then
@@ -1603,6 +1576,9 @@ function fitnessAlreadyMeasured()
 end
 
 function displayGenome(genome)
+
+	if not genome then return end
+
 	local network = genome.network
 	local cells = {}
 	local i = 1
@@ -1849,34 +1825,12 @@ function restart()
 	end
 end
 
-
---function onExit()
-	--forms.destroy(form)
---end
-
--- This seems unnecessary.
---writeFile("temp.pool")
-
---event.onexit(onExit)
-
---form = forms.newform(200, 260, "Fitness")
---maxFitnessLabel = forms.label(form, "Max Fitness: " .. math.floor(pool.maxFitness), 5, 8)
---showNetwork = forms.checkbox(form, "Show Map", 5, 30)
---showMutationRates = forms.checkbox(form, "Show M-Rates", 5, 52)
---restartButton = forms.button(form, "Restart", initializePool, 5, 77)
---saveButton = forms.button(form, "Save", savePool, 5, 102)
---loadButton = forms.button(form, "Load", loadPool, 80, 102)
---saveLoadFile = forms.textbox(form, Filename .. ".pool", 170, 25, nil, 5, 148)
---saveLoadLabel = forms.label(form, "Save/Load:", 5, 129)
---playTopButton = forms.button(form, "Play Top", playTop, 5, 170)
---hideBanner = forms.checkbox(form, "Hide Banner", 5, 190)
-
--- Since we can't use forms.button in FCEUX, we have to call this manually.
-if LOAD_FROM_FILE then
-	loadPool()
+function getCurrentGenome() 
+	local species = pool.species[pool.currentSpecies]
+	return species.genomes[pool.currentGenome]
 end
 
-function getFitness()
+function getTotalFitness()
 
 	local fitness = rightmost - pool.currentFrame / 2
 
@@ -1885,7 +1839,7 @@ function getFitness()
 	end
 
 	if isDead() then
-		fitness = fitness - 200
+		fitness = fitness - getEstimatedTimeoutFramesLeft()
 	end
 
 	if fitness == 0 then
@@ -1911,60 +1865,156 @@ function getGenerationPercentage()
 	return math.floor(measured / total * 100)
 end
 
-while true do
+function isRunFinished()
+	return isTimeOut() or isDead() 
+end
 
-	gui.opacity(1)
+function isTimeOut()
+	return timeout + pool.currentFrame / 4 <= 0
+end
 
-	local species = pool.species[pool.currentSpecies]
-	local genome = species.genomes[pool.currentGenome]
+function getEstimatedTimeoutFramesLeft()
+	local time = timeout
+	local frame = pool.currentFrame
+	local count = 0
 
-	if SHOW_NETWORK then
-		displayGenome(genome)
+	-- TODO better algorithm without loop
+
+	while true do
+		time = time - 1
+		frame = frame + 1
+
+		if time + frame / 4 <= 0 then
+			return count
+		else
+			count = count + 1
+		end
 	end
+end
 
-	if pool.currentFrame%5 == 0 then
-		evaluateCurrent()
-	end
-
-	joypad.set(1, controller)
-
-	getPositions()
+function updateTimeout()
 	if marioX > rightmost then
 		rightmost = marioX
 		timeout = TimeoutConstant
 	end
 
 	timeout = timeout - 1
+end
 
-	local timeoutBonus = pool.currentFrame / 4
+function onRestart()
+	clearPlayingRecords()
+	clearGenerationRecords()
+end	
 
-	if timeout + timeoutBonus <= 0 or isDead() then
+function onNewRecord()
+	if SynchronizedPlayback then resetPlaybackFrames() end
+	return newRecording();
+end
+
+function onNewGeneration()
+	if SaveGenerationRecords then 
+		writeRecordsBackupFile()
+	end
+
+	clearGenerationRecords()
+end
+
+function onRecordCompleted(record, generation, species, genome, fitness)
+
+	if SaveGenerationRecords then
+		saveGenerationRecord(record, generation, species, genome, fitness)
+	end
+
+	addRecordToPlayback(record)
+end
+
+function onDraw()
+	getPositions()
+
+	drawPlayingRecords()
+	drawGUI()
+end
+
+function onBeforeFrame()
+	runScheduledFunctions()
+
+	if pool.currentFrame%5 == 0 then
+		evaluateCurrent()
+	end
+
+	joypad.set(1, controller)
+end
+
+function onAfterFrame() 
+	getPositions()
+	updateTimeout()
+
+	pool.currentFrame = pool.currentFrame + 1
+	onFrameCompleted(CurrentRecord, pool.currentFrame)
+
+	if isRunFinished() then
 		
-		local fitness = getFitness()
+		local genome = getCurrentGenome()
+		local fitness = getTotalFitness()
+		
 		genome.fitness = fitness
 
 		if fitness > pool.maxFitness then
 			pool.maxFitness = fitness
-			--forms.settext(maxFitnessLabel, "Max Fitness: " .. math.floor(pool.maxFitness))
 			emu.print("New Max Fitness: " .. math.floor(pool.maxFitness))
-			writeFile("backups/backup." .. pool.generation .. "." .. SAVE_LOAD_FILE)
+			writeGenerationBackupFile()
 		end
 
 		emu.print("Gen: " 	.. pool.generation 	..
 			"  Species: " 	.. pool.currentSpecies 	..
 			"  Genome: " 	.. pool.currentGenome 	..
 			"  Fitness: " 	.. fitness)
+
+		if PauseAfterDeath and isDead() then
+			waitForFrames(15)
+		end
+
 		pool.currentSpecies = 1
 		pool.currentGenome = 1
+
 		while fitnessAlreadyMeasured() do
 			nextGenome()
 		end
+
 		onRecordCompleted(CurrentRecord, pool.generation, pool.currentSpecies, pool.currentGenome, fitness)
 		initializeRun()
 	end
+end
 
-	pool.currentFrame = pool.currentFrame + 1
-	onEachFrame(CurrentRecord, pool.currentFrame)
+function waitForFrames(frameCount)
+	for i = 1,frameCount do
+		emu.frameadvance()
+	end
+end
 
-	emu.frameadvance();
+function onFrameCompleted(currentRecord, currentFrame)
+	recordCurrentFrame(currentRecord)
+	updatePlaybackFrame(currentFrame);
+end
+
+-- Main logic
+
+loadGUISprites()
+loadCharacterSprites()
+
+gui.register(onDraw)
+
+-- Since we can't use forms.button in FCEUX, we have to call this manually.
+if LOAD_FROM_FILE then
+	loadPool()
+end
+
+if pool == nil then
+	initializePool()
+end
+
+while true do
+	onBeforeFrame()
+	emu.frameadvance()
+	onAfterFrame()
 end
