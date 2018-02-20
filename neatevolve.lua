@@ -1832,14 +1832,21 @@ end
 
 function getTotalFitness()
 
-	local fitness = rightmost - pool.currentFrame / 2
+	local framesPenalty = 0
+
+	if isDead() then
+		framesPenalty = getEstimatedTimeoutFramesLeft()
+
+		if framesPenalty < 0 then
+			framesPenalty = 0
+		end
+
+	end
+
+	local fitness = rightmost - (pool.currentFrame + framesPenalty) / 2
 
 	if rightmost > 3186 then
 		fitness = fitness + 1000
-	end
-
-	if isDead() then
-		fitness = fitness - getEstimatedTimeoutFramesLeft()
 	end
 
 	if fitness == 0 then
