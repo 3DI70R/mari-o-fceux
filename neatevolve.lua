@@ -1942,17 +1942,41 @@ function onDraw()
 	drawGUI()
 end
 
-function onBeforeFrame()
-	runScheduledFunctions()
+function waitForFrames(frameCount)
+	for i = 1,frameCount do
+		emu.frameadvance()
+	end
+end
+
+function onFrameCompleted(currentRecord, currentFrame)
+	recordCurrentFrame(currentRecord)
+	updatePlaybackFrame(currentFrame);
+end
+
+-- Main logic
+
+loadGUISprites()
+loadCharacterSprites()
+
+gui.register(onDraw)
+
+-- Since we can't use forms.button in FCEUX, we have to call this manually.
+if LOAD_FROM_FILE then
+	loadPool()
+end
+
+if pool == nil then
+	initializePool()
+end
+
+while true do
 
 	if pool.currentFrame%5 == 0 then
 		evaluateCurrent()
 	end
 
 	joypad.set(1, controller)
-end
 
-function onAfterFrame() 
 	getPositions()
 	updateTimeout()
 
@@ -1991,37 +2015,8 @@ function onAfterFrame()
 		onRecordCompleted(CurrentRecord, pool.generation, pool.currentSpecies, pool.currentGenome, fitness)
 		initializeRun()
 	end
-end
+	
+	runScheduledFunctions()
 
-function waitForFrames(frameCount)
-	for i = 1,frameCount do
-		emu.frameadvance()
-	end
-end
-
-function onFrameCompleted(currentRecord, currentFrame)
-	recordCurrentFrame(currentRecord)
-	updatePlaybackFrame(currentFrame);
-end
-
--- Main logic
-
-loadGUISprites()
-loadCharacterSprites()
-
-gui.register(onDraw)
-
--- Since we can't use forms.button in FCEUX, we have to call this manually.
-if LOAD_FROM_FILE then
-	loadPool()
-end
-
-if pool == nil then
-	initializePool()
-end
-
-while true do
-	onBeforeFrame()
 	emu.frameadvance()
-	onAfterFrame()
 end
