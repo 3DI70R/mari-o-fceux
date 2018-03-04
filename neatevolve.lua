@@ -898,7 +898,7 @@ function newPool()
 	pool.innovation = Outputs
 	pool.currentSpecies = 1
 	pool.currentGenome = 1
-	pool.currentFrame = 0
+	pool.currentFrame = 1
 	pool.maxFitness = 0
 
 	return pool
@@ -1527,7 +1527,7 @@ function initializeRun()
 
 	savestate.load(SavestateObj);
 	rightmost = 0
-	pool.currentFrame = 0
+	pool.currentFrame = 1
 	timeout = TimeoutConstant
 	clearJoypad()
 
@@ -1538,8 +1538,7 @@ function initializeRun()
 end
 
 function evaluateCurrent()
-	local species = pool.species[pool.currentSpecies]
-	local genome = species.genomes[pool.currentGenome]
+	local genome = getCurrentGenome()
 
 	inputs = getInputs()
 	controller = evaluateNetwork(genome.network, inputs)
@@ -1789,7 +1788,6 @@ function loadFile(filename)
 		nextGenome()
 	end
 	initializeRun()
-	pool.currentFrame = pool.currentFrame + 1
 end
 
 function loadPool()
@@ -1814,7 +1812,6 @@ function playTop()
 	pool.maxFitness = maxfitness
 	--forms.settext(maxFitnessLabel, "Max Fitness: " .. math.floor(pool.maxFitness))
 	initializeRun()
-	pool.currentFrame = pool.currentFrame + 1
 	return
 end
 
@@ -1971,7 +1968,7 @@ end
 
 while true do
 
-	if pool.currentFrame%5 == 0 then
+	if pool.currentFrame % 5 == 0 then
 		evaluateCurrent()
 	end
 
@@ -2015,8 +2012,7 @@ while true do
 		onRecordCompleted(CurrentRecord, pool.generation, pool.currentSpecies, pool.currentGenome, fitness)
 		initializeRun()
 	end
-	
-	runScheduledFunctions()
 
+	runScheduledFunctions()
 	emu.frameadvance()
 end
