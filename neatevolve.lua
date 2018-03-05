@@ -96,11 +96,14 @@ RecordTrailFrameCount = 30 -- trail length in frames
 DissolveAnimationFrames = 15 -- fade out animation duration in frames
 PlayerCloseFadeDistance = 32 -- objects will start to fade at this distance to player, so player can be visible in very crowded environment. 0 to disable
 PlayerCloseMaxFade = 0.1 -- maximum fade amount, so record still can be visible, even if its on same spot as player
+CrossFadeOnRestart = false
 
 GenerationRecordsList = {}
 PlayingRecordsList = {}
 CurrentRecord = {}
 ScriptQueueSchedule = {}
+LastFrameScreenshot = nil
+LastFrameScreenshotVisibility = 0
 
 CheckboxOnSprite = nil
 CheckboxOffSprite = nil
@@ -462,8 +465,20 @@ function updateGUIParams()
 	end
 
 	local targetOffset = 0
-	if IsSettingsOpened then targetOffset = -128 end
+	if IsSettingsOpened then targetOffset = -133 end
 	GUIOffset = GUIOffset + (targetOffset - GUIOffset)  * 0.15
+end
+
+function startScreenCrossFade()
+	LastFrameScreenshot = gui.gdscreenshot()
+	LastFrameScreenshotVisibility = 1
+end
+
+function updateScreenCrossFade()
+	if LastFrameScreenshotVisibility > 0 then
+		LastFrameScreenshotVisibility = LastFrameScreenshotVisibility - 0.05
+		if LastFrameScreenshotVisibility < 0 then LastFrameScreenshotVisibility = 0 end
+	end
 end
 
 function formatFitness(fitness, appendSign) 
@@ -484,6 +499,12 @@ function getNumberSign(number)
 end
 
 function drawGUI() 
+
+	if SHOW_NETWORK then
+		gui.opacity(1)
+		displayGenome(getCurrentGenome())
+	end
+
 	updateGUIParams()
 	updateGUIInput()
 
@@ -547,21 +568,17 @@ function drawGUI()
 
 			SaveGenerationRecords = drawCheckbox(8, 104 + bottomOffset, 96, SaveGenerationRecords, "Save records")
 			PauseAfterDeath = drawCheckbox(8, 112 + bottomOffset, 96, PauseAfterDeath, "Pause after death")
+			CrossFadeOnRestart = drawCheckbox(8, 120 + bottomOffset, 96, CrossFadeOnRestart, "Cross fade on restart")
 
-			if drawButton(170, 112 + bottomOffset, 40, "Play Top", { 0, 255, 0, 128 }) then 
+			if drawButton(170, 120 + bottomOffset, 40, "Play Top", { 0, 255, 0, 128 }) then 
 				IsSettingsOpened = false
 				schedule(playTop)
 			end
-			if drawButton(212, 112 + bottomOffset, 34, "Restart", { 255, 0, 0, 128 }) then
+			if drawButton(212, 120 + bottomOffset, 34, "Restart", { 255, 0, 0, 128 }) then
 				IsSettingsOpened = false
 				schedule(restart)
 			end
 		end
-	end
-
-	if SHOW_NETWORK then
-		gui.opacity(1)
-		displayGenome(getCurrentGenome())
 	end
 
 	-- This check order is intentional, so panel will block clicks
@@ -716,6 +733,14 @@ function drawPlayingRecords()
 	if DrawRecordAsBox then
 		forEachPlayingRecord(drawRecordBox)
 	end	
+end
+
+function drawScreenCrossFade()
+	if LastFrameScreenshot and LastFrameScreenshotVisibility ~= 0 then 
+		gui.opacity(LastFrameScreenshotVisibility)
+		gui.image(0, 0, LastFrameScreenshot)
+		drawShadedText(108, 108, "RESTARTING...")
+	end
 end
 
 -- Saving, Loading
@@ -1925,6 +1950,10 @@ end
 
 function onRecordCompleted(record, generation, species, genome, fitness)
 
+	if CrossFadeOnRestart then
+		startScreenCrossFade()
+	end
+
 	if SaveGenerationRecords then
 		saveGenerationRecord(record, generation, species, genome, fitness)
 	end
@@ -1936,6 +1965,7 @@ function onDraw()
 	getPositions()
 
 	drawPlayingRecords()
+	drawScreenCrossFade()
 	drawGUI()
 end
 
@@ -1947,7 +1977,8 @@ end
 
 function onFrameCompleted(currentRecord, currentFrame)
 	recordCurrentFrame(currentRecord)
-	updatePlaybackFrame(currentFrame);
+	updatePlaybackFrame(currentFrame)
+	updateScreenCrossFade()
 end
 
 -- Main logic
