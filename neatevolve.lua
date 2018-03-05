@@ -31,9 +31,6 @@ LOAD_FROM_FILE = nil
 SHOW_NETWORK = true
 SHOW_MUTATION_RATES = true
 
--- Load the level from FCEUX savestate slot
-SAVESTATE_SLOT = 1
-
 -- #############################################################################
 -- #############################################################################
 -- #############################################################################
@@ -43,7 +40,6 @@ RECORD_LOAD_FILE = "SMB1-1.rec"
 
 os.execute("mkdir backups")
 
-SavestateObj = savestate.object(SAVESTATE_SLOT)
 ButtonNames = {
 	"A",
 	"B",
@@ -138,6 +134,19 @@ CurrentControlId = 0
 MouseX = 0
 MouseY = 0
 
+-- Game state
+CurrentLocationId = nil
+CurrentWorld = nil
+CurrentLevel = nil
+CurrentLevelLayout = nil
+CurrentEnemyLayout = nil
+PlayerX = nil
+PlayerY = nil
+ScreenX = nil
+
+LevelStartSaveFile = nil
+LocationStartSaveFile = nil
+
 -- Sprite management functions
 
 function loadGUISprites()
@@ -191,9 +200,17 @@ end
 
 -- Game data parsing
 
-function getLevelLayout() 
-	return memory.readbyte(0x00e7)
-end	
+function isGameStarted()
+	return memory.readbyte(0x0764) == 1
+end
+
+function isCutscenePlaying()
+	return memory.readbyte(0x757) == 1
+end
+
+function getCurrentLocationId()
+	return CurrentLocationId
+end
 
 function isPlayerLoaded()
 	return memory.readbyte(0x06C9) == 0xff and memory.readbyte(0x0490) ~= 0x00 -- TODO: check if this is a proper way to detect that player is loaded into level
@@ -229,6 +246,42 @@ function readCharacterAnimationSprite()
 	-- if anim == 0xe0 ... dead
 
 	return 1
+end
+
+function updateGameInfo()
+
+	local world = memory.readbyte(0x075F)
+	local level = memory.readbyte(0x0760)
+	local levelLayout = memory.readbyte(0x00E7) * 256 + memory.readbyte(0x00E8)
+	local enemyLayout = memory.readbyte(0x00E9) * 256 + memory.readbyte(0x00EA)
+	local isLevelChanged = world ~= CurrentWorld or level ~= CurrentLevel
+	local isLayoutChanged = levelLayout ~= CurrentLevelLayout or enemyLayout ~= CurrentEnemyLayout
+
+	if isLevelChanged or isLayoutchanged then
+
+		local hexLevel = string.format("%x", levelLayout)
+		local hexEnemy = string.format("%x", enemyLayout)
+
+		CurrentLocationId = world .. "-" .. level .. "-" .. hexLevel .. hexEnemy
+		CurrentWorld = world
+		CurrentLevel = level
+		CurrentLevelLayout = levelLayout
+		CurrentEnemyLayout = enemyLayout
+
+		if isLevelChanged then
+			onNewLevel(CurrentWorld, CurrentLevel)
+		end
+
+		if isLayoutChanged then
+			onNewLocation(CurrentLocationId)
+		end
+
+	end
+
+	PlayerX = memory.readbyte(0x6D) * 0x100 + memory.readbyte(0x86)
+	PlayerY = memory.readbyte(0x03B8) + (memory.readbyte(0xB5) - 1) * 0xFF
+	ScreenX = memory.readbyte(0x03AD)
+
 end
 
 -- Record management functions
@@ -268,12 +321,12 @@ function getRecordColor()
 end
 
 function recordCurrentFrame(record)
-	record.frames[#record.frames + 1] = newFrame(marioX, marioY, 
+	record.frames[#record.frames + 1] = newFrame(PlayerX, PlayerY, 
 		readCharacterAnimationSprite(), 
 		readCharacterAnimationDirection(),
-		getLevelLayout(),
+		getCurrentLocationId(),
 		isPlayerLoaded());
-	record.hash = record.hash + marioX * marioY
+	record.hash = record.hash + PlayerX * PlayerY
 end
 
 function saveGenerationRecord(record, generation, species, genome, fitness)
@@ -367,6 +420,7 @@ function updateGUIInput()
 	if IsMouseReleased then 
 		FocusedControlId = -1
 	end
+
 	CurrentControlId = 0
 end
 
@@ -498,7 +552,7 @@ function getNumberSign(number)
 	if number < 0 then return "-" else return "+" end
 end
 
-function drawGUI() 
+function drawGUI()
 
 	if SHOW_NETWORK then
 		gui.opacity(1)
@@ -591,8 +645,9 @@ end
 
 function forEachPlayingRecord(func)
 
-	local xScreenOffset = marioX - screenX
+	local xScreenOffset = PlayerX - ScreenX
 	local yScreenOffset = 0
+	local levelLayoutId = getCurrentLocationId()
 
 	for i, playback in ipairs(PlayingRecordsList) do
 
@@ -605,7 +660,7 @@ function forEachPlayingRecord(func)
 
 		if lastFrame > frameCount then lastFrame = frameCount end
 
-		func(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
+		func(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset, levelLayoutId)
 	end	
 end
 
@@ -613,7 +668,7 @@ function calculateProximityOpacity(frameData)
 	local opacityScale = 1
 
 	if PlayerCloseFadeDistance > 0 then
-		opacityScale = getProximity(frameData.x, frameData.y, marioX, marioY) / PlayerCloseFadeDistance
+		opacityScale = getProximity(frameData.x, frameData.y, PlayerX, PlayerY) / PlayerCloseFadeDistance
 		if opacityScale > 1 then opacityScale = 1 end
 		if opacityScale < PlayerCloseMaxFade then opacityScale = PlayerCloseMaxFade end
 	end	
@@ -621,14 +676,13 @@ function calculateProximityOpacity(frameData)
 	return opacityScale
 end
 
-function drawRecordTrail(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
+function drawRecordTrail(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset, currentLayout)
 
 	local record = playback.record
 	local firstFrame = currentFrame - RecordTrailFrameCount
 
 	if firstFrame > lastFrame then firstFrame = lastFrame end
 	if firstFrame < 1 then firstFrame = 1 end
-	local currentLayout = getLevelLayout()
 
 	local prevXPosition
 	local prevYPosition
@@ -659,11 +713,10 @@ function drawRecordTrail(playback, lastFrame, currentFrame, xScreenOffset, yScre
 	end
 end
 
-function drawRecordBox(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
+function drawRecordBox(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset, currentLayout)
 
 	local record = playback.record
 	local frameData = record.frames[lastFrame]
-	local currentLayout = getLevelLayout()
 
 	if not frameData.isVisible or frameData.level ~= currentLayout then return end
 
@@ -689,11 +742,10 @@ function drawRecordBox(playback, lastFrame, currentFrame, xScreenOffset, yScreen
 	end	
 end
 
-function drawRecordCharacter(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset)
+function drawRecordCharacter(playback, lastFrame, currentFrame, xScreenOffset, yScreenOffset, currentLayout)
 	
 	local record = playback.record
 	local frameData = record.frames[lastFrame]
-	local currentLayout = getLevelLayout()
 
 	if not frameData.isVisible or frameData.level ~= currentLayout then return end
 
@@ -718,7 +770,7 @@ end
 
 function drawPlayingRecords()
 
-	if not isPlayerLoaded() then
+	if not isPlayerLoaded() or isCutscenePlaying() then
 		return -- if player is not loaded, then probably it is a blank screen, so dont display replays here
 	end
 
@@ -819,6 +871,12 @@ function runScheduledFunctions()
 	end
 end
 
+function waitForFrames(frameCount)
+	for i = 1,frameCount do
+		emu.frameadvance()
+	end
+end
+
 -- Original algorithm
 
 function toRGBA(ARGB)
@@ -829,21 +887,14 @@ function isDead()
 
 	local playerState = memory.readbyte(0x000E)
 
-	return playerState == 0x0B or 	-- Dying
-		playerState == 0x06 or 		-- Dead
-		memory.readbyte(0x00B5) > 1	-- Below viewport (in pit)
-end
-
-function getPositions()
-	marioX = memory.readbyte(0x6D) * 0x100 + memory.readbyte(0x86)
-	marioY = memory.readbyte(0x03B8) + (memory.readbyte(0xB5) - 1) * 0xFF
-
-	screenX = memory.readbyte(0x03AD)
+	return playerState == 0x0B or 		-- Dying
+		   playerState == 0x06 or 		-- Dead
+		   memory.readbyte(0x00B5) > 1	-- Below viewport (in pit)
 end
 
 function getTile(dx, dy)
-	local x = marioX + dx + 8
-	local y = marioY + dy
+	local x = PlayerX + dx + 8
+	local y = PlayerY + dy
 	local page = math.floor(x/256)%2
 
 	local subx = math.floor((x%256)/16)
@@ -876,7 +927,6 @@ function getSprites()
 end
 
 function getInputs()
-	getPositions()
 
 	local sprites = getSprites()
 
@@ -887,13 +937,13 @@ function getInputs()
 			inputs[#inputs+1] = 0
 
 			tile = getTile(dx, dy)
-			if tile == 1 and marioY+dy + 16 < 0x1B0 then
+			if tile == 1 and PlayerY+dy + 16 < 0x1B0 then
 				inputs[#inputs] = 1
 			end
 
 			for i = 1,#sprites do
-				distx = math.abs(sprites[i]["x"] - (marioX+dx))
-				disty = math.abs(sprites[i]["y"] - (marioY+dy + 16))
+				distx = math.abs(sprites[i]["x"] - (PlayerX+dx))
+				disty = math.abs(sprites[i]["y"] - (PlayerY+dy + 16))
 				if distx <= 8 and disty <= 8 then
 					inputs[#inputs] = -1
 				end
@@ -1550,7 +1600,7 @@ end
 function initializeRun()
 	CurrentRecord = onNewRecord()
 
-	savestate.load(SavestateObj);
+	savestate.load(LocationStartSaveFile);
 	rightmost = 0
 	pool.currentFrame = 1
 	timeout = TimeoutConstant
@@ -1559,6 +1609,8 @@ function initializeRun()
 	local species = pool.species[pool.currentSpecies]
 	local genome = species.genomes[pool.currentGenome]
 	generateNetwork(genome)
+
+	updateGameInfo()
 	evaluateCurrent()
 end
 
@@ -1847,7 +1899,7 @@ function restart()
 	end
 end
 
-function getCurrentGenome() 
+function getCurrentGenome()
 	local species = pool.species[pool.currentSpecies]
 	return species.genomes[pool.currentGenome]
 end
@@ -1922,8 +1974,8 @@ function getEstimatedTimeoutFramesLeft()
 end
 
 function updateTimeout()
-	if marioX > rightmost then
-		rightmost = marioX
+	if PlayerX > rightmost then
+		rightmost = PlayerX
 		timeout = TimeoutConstant
 	end
 
@@ -1962,17 +2014,9 @@ function onRecordCompleted(record, generation, species, genome, fitness)
 end
 
 function onDraw()
-	getPositions()
-
 	drawPlayingRecords()
 	drawScreenCrossFade()
 	drawGUI()
-end
-
-function waitForFrames(frameCount)
-	for i = 1,frameCount do
-		emu.frameadvance()
-	end
 end
 
 function onFrameCompleted(currentRecord, currentFrame)
@@ -1981,6 +2025,27 @@ function onFrameCompleted(currentRecord, currentFrame)
 	updateScreenCrossFade()
 end
 
+function onNewLevel(world, level) 
+
+	emu.print("New level! " .. world .. "-" .. level)
+
+	LevelStartSaveFile = savestate.create()
+	savestate.save(LevelStartSaveFile)
+
+end
+
+function onNewLocation(location)
+
+	emu.print("New location! " .. location)
+
+	LocationStartSaveFile = savestate.create()
+	savestate.save(LocationStartSaveFile)
+
+	initializePool()
+
+end
+
+
 -- Main logic
 
 loadGUISprites()
@@ -1988,16 +2053,23 @@ loadCharacterSprites()
 
 gui.register(onDraw)
 
--- Since we can't use forms.button in FCEUX, we have to call this manually.
-if LOAD_FROM_FILE then
-	loadPool()
+-- State dependent logic
+
+function tryToStartGame()
+	local controller = {}
+
+	controller.start = true
+	joypad.set(1, controller)
+
+	waitForFrames(10)
+
+	controller.start = false
+	joypad.set(1, controller)
+
+	waitForFrames(10)
 end
 
-if pool == nil then
-	initializePool()
-end
-
-while true do
+function evaluateNormalFrame()
 
 	if pool.currentFrame % 5 == 0 then
 		evaluateCurrent()
@@ -2005,7 +2077,6 @@ while true do
 
 	joypad.set(1, controller)
 
-	getPositions()
 	updateTimeout()
 
 	pool.currentFrame = pool.currentFrame + 1
@@ -2045,5 +2116,20 @@ while true do
 	end
 
 	runScheduledFunctions()
+end
+
+-- Main Game Loop
+
+while true do
+
+	if not isGameStarted() then
+		tryToStartGame()
+	end
+
+	if not isCutscenePlaying() and isPlayerLoaded() then
+		updateGameInfo()
+		evaluateNormalFrame()
+	end
+
 	emu.frameadvance()
 end
