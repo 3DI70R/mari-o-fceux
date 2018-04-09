@@ -14,7 +14,7 @@ It is quite boring to watch how original algorithm takes infinite amount of same
 - Can export replays to use with custom software
 
 ## Instructions
-1. Save **neatevolve.lua** and **Sprites** folder somewhere on your computer.
+1. Save **neatevolve.lua** and **sprites** folder somewhere on your computer.
 2. Open Super Mario Bros. in FCEUX.
 3. Go to some level and make a savestate at the beginning of the level. Use savestate slot 1 or edit the settings in the script.
 4. Load the script in FCEUX (File -> Load Lua Script)
